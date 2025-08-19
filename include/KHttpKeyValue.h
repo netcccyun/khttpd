@@ -73,6 +73,7 @@ public:
 		case 100:kgl_str_set(ret, "HTTP/1.1 100 Continue"); return;
 		case 101:kgl_str_set(ret, "HTTP/1.1 101 Switching Protocols"); return;
 		case 102:kgl_str_set(ret, "HTTP/1.1 102 Processing"); return; /* WebDAV */
+		case 103:kgl_str_set(ret, "HTTP/1.1 103 Early Hints"); return;
 
 		case 200:kgl_str_set(ret, "HTTP/1.1 200 OK"); return;
 		case 201:kgl_str_set(ret, "HTTP/1.1 201 Created"); return;
