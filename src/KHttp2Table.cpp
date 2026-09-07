@@ -3,7 +3,6 @@
 #include "klog.h"
 
 #ifdef ENABLE_HTTP2
-#define KGL_HTTP_V2_TABLE_SIZE  4096
 static kgl_http_v2_header_t  kgl_http_v2_static_table[] = {
 	{ kgl_string(":authority"), kgl_string("") },
 	{ kgl_string(":method"), kgl_string("GET") },
@@ -214,25 +213,24 @@ bool KHttp2::add_header(kgl_http_v2_header_t *header)
 
 	//printf("http2 add header to hpack table: \"%s[%d]: %s[%d]\"\n",header->name.data, header->name.len,header->value.data, header->value.len);
 
+	if (!table_account(header->name.len + header->value.len)) {
+		return true;
+	}
+
 	if (hpack.entries == NULL) {
 		hpack.allocated = 64;
-		hpack.size = KGL_HTTP_V2_TABLE_SIZE;
-		hpack.free = KGL_HTTP_V2_TABLE_SIZE;
 
 		hpack.entries = (kgl_http_v2_header_t **)kgl_palloc(c->pool,sizeof(kgl_http_v2_header_t *)* hpack.allocated);
 		if (hpack.entries == NULL) {
 			return false;
 		}
 
-		hpack.storage = (u_char *)kgl_palloc(c->pool,hpack.free);
+		/* The ring addresses always span the fixed HPACK storage capacity. */
+		hpack.storage = (u_char *)kgl_palloc(c->pool, KGL_HTTP_V2_TABLE_SIZE);
 		if (hpack.storage == NULL) {
 			return false;
 		}
 		hpack.pos = hpack.storage;
-	}
-
-	if (!table_account(header->name.len + header->value.len)) {
-		return true;
 	}
 
 	if (hpack.reused == hpack.deleted) {
@@ -259,7 +257,7 @@ bool KHttp2::add_header(kgl_http_v2_header_t *header)
 		avail = KGL_HTTP_V2_TABLE_SIZE;
 	}
 
-	avail -= header->name.len;
+	avail = hpack.storage + KGL_HTTP_V2_TABLE_SIZE - hpack.pos;
 
 	entry->value.len = header->value.len;
 	entry->value.data = (char *)hpack.pos;

@@ -251,6 +251,16 @@ KUpstream* KSockPoolHelper::get_upstream(uint32_t flags, const char* sni_host) {
 }
 bool KSockPoolHelper::setHostPort(KString host, int port, const char* s) {
 	bool destChanged = false;
+#ifdef KSOCKET_UNIX
+	bool new_is_unix = false;
+	if (strncasecmp(host.c_str(), "unix:", 5) == 0) {
+		new_is_unix = true;
+		host = host.substr(5);
+	}
+	if (!host.empty() && host[0] == '/') {
+		new_is_unix = true;
+	}
+#endif
 	lock.Lock();
 	if (s && *s == 'h') {
 		h2 = 1;
@@ -261,7 +271,11 @@ bool KSockPoolHelper::setHostPort(KString host, int port, const char* s) {
 	if (s && (*s != 's' && *s != 'S')) {
 		s = NULL;
 	}
-	if (this->host != host || this->port != port || this->ssl!=s) {
+	if (this->host != host || this->port != port || this->ssl!=s
+#ifdef KSOCKET_UNIX
+		|| this->is_unix != new_is_unix
+#endif
+		) {
 		destChanged = true;
 	}
 	this->host = host;
@@ -292,6 +306,7 @@ bool KSockPoolHelper::setHostPort(KString host, int port, const char* s) {
 		this->alpn = KGL_ALPN_HTTP2;
 	}
 #endif
+	this->no_sni = 0;
 	if (ssl_buf && strchr(ssl_buf, 'n')) {
 		this->no_sni = 1;
 	}
@@ -335,13 +350,7 @@ bool KSockPoolHelper::setHostPort(KString host, int port, const char* s) {
 	}
 #endif
 #ifdef KSOCKET_UNIX
-	if (strncasecmp(this->host.c_str(), "unix:", 5) == 0) {
-		is_unix = 1;
-		this->host = this->host.substr(5);
-	}
-	if (this->host[0] == '/') {
-		is_unix = 1;
-	}
+	is_unix = new_is_unix;
 #endif
 	lock.Unlock();
 #ifdef ENABLE_UPSTREAM_SSL

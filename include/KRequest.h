@@ -48,8 +48,17 @@ public:
 		}
 		assert(!header);
 	}
-	KRequestData(): raw_url(false){
-		memset(this, 0, sizeof(*this));
+	KRequestData(): raw_url(false) {
+		header = last = nullptr;
+		memset(static_cast<KRequestPlainData*>(this), 0, sizeof(KRequestPlainData));
+		mark = 0;
+		http_version = 0;
+		state = 0;
+		meth = METH_UNSET;
+		url = nullptr;
+		opaque = nullptr;
+		client_ip = nullptr;
+		fh = nullptr;
 		begin_time_msec = kgl_current_msec;
 		begin_request();
 	}
@@ -105,7 +114,7 @@ protected:
 	}
 	bool parse_method(const char* src, int len) {
 		meth = KHttpKeyValue::get_method(src, len);
-		return meth >= 0;
+		return meth != METH_UNSET;
 	}
 	bool parse_connect_url(u_char* src, size_t len) {
 		u_char* ss = (u_char*)memchr(src, ':', len);
@@ -127,15 +136,35 @@ protected:
 		return true;
 	}
 	bool parse_http_version(u_char* ver, size_t len) {
-		u_char* dot = (u_char*)memchr(ver, '.', len);
-		if (dot == NULL) {
+		/* HTTP-version = HTTP-name "/" DIGIT "." DIGIT (RFC 9112). */
+		if (len != 8 || memcmp(ver, "HTTP/", 5) != 0 ||
+			ver[5] < '0' || ver[5] > '9' || ver[6] != '.' ||
+			ver[7] < '0' || ver[7] > '9') {
 			return false;
 		}
-		if ((size_t)(dot - ver) < len) {
-			set_http_version(!!(*(dot - 1) - 0x30), !!(*(dot + 1) - 0x30));
-		} else {
-			set_http_version(!!(*(dot - 1) - 0x30), 0);
+		set_http_version((uint8_t)(ver[5] - '0'), (uint8_t)(ver[7] - '0'));
+		return true;
+	}
+	bool parse_content_length(const char* val, int len) {
+		if (len <= 0 || KBIT_TEST(flags, RQ_INPUT_CHUNKED)) {
+			return false;
 		}
+		int64_t length = 0;
+		for (int i = 0; i < len; ++i) {
+			if (val[i] < '0' || val[i] > '9') {
+				return false;
+			}
+			const int digit = val[i] - '0';
+			if (length > (INT64_MAX - digit) / 10) {
+				return false;
+			}
+			length = length * 10 + digit;
+		}
+		if (KBIT_TEST(flags, RQ_HAS_CONTENT_LEN) && left_read != length) {
+			return false;
+		}
+		left_read = length;
+		KBIT_SET(flags, RQ_HAS_CONTENT_LEN);
 		return true;
 	}
 	/* call clean when end request */

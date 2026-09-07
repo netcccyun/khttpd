@@ -26,6 +26,11 @@ static int handle_http2https_error(void* arg, int got) {
 	sink->start_response_body(body_len);
 	if (sink->data.meth != METH_HEAD) {
 		sink->write_all(body, body_len);
+	} else {
+		// start_response_body() buffers HTTP/1 response headers until the first
+		// write.  HEAD has no body, so explicitly finish the response or the
+		// client receives an empty connection instead of the 497 headers.
+		sink->end_request();
 	}
 	return 0;
 }
@@ -269,6 +274,9 @@ void KHttpSink::start(int header_len) {
 	for (;;) {
 		int len;
 		char* hot = get_read_buffer(&len);
+		if (hot == nullptr || len <= 0) {
+			return;
+		}
 		//printf("hot=[%p] len=[%d]\n", hot, len);
 		int got = kfiber_net_read(cn, hot, len);
 		if (got <= 0) {

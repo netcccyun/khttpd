@@ -30,6 +30,7 @@ http2_buff * KHttp2WriteBuffer::clean()
 {
 	http2_buff *remove_list = header;
 	left = 0;
+	counted_frames = 0;
 	header = NULL;
 	reset();
 	return remove_list;

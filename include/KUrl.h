@@ -17,7 +17,7 @@ class KUrl : public kgl_url{
 
 public:
 	KUrl(bool support_share) {
-		memset(this, 0, sizeof(KUrl));
+		memset(static_cast<kgl_url*>(this), 0, sizeof(kgl_url));
 		refs_count = !!support_share;
 	}
 	bool match_accept_encoding(u_char accept_encoding) {

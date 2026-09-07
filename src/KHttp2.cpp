@@ -11,10 +11,19 @@
 #include "KPreRequest.h"
 
 #ifdef ENABLE_HTTP2
-http2_buff* get_frame(uint32_t sid, size_t length, uint8_t type, u_char flags) {
+http2_buff* KHttp2::get_frame(uint32_t sid, size_t length, uint8_t type, u_char flags) {
+	if (write_buffer.getCountedFrames() >= KGL_HTTP_V2_MAX_FRAMES) {
+		klog(KLOG_WARNING, "http2 flood detected, outstanding frames=%d\n", write_buffer.getCountedFrames());
+		return NULL;
+	}
 	http2_buff* buf = new http2_buff;
 	http2_frame_header* h = (http2_frame_header*)malloc(length + sizeof(http2_frame_header));
+	if (h == NULL) {
+		delete buf;
+		return NULL;
+	}
 	buf->used = (int)(length + sizeof(http2_frame_header));
+	buf->counted = 1;
 	memset(h, 0, buf->used);
 	buf->data = (char*)h;
 	h->set_length_type((int)length, (int)type);
@@ -130,6 +139,8 @@ static bool construct_cookie_header(KHttp2Context* ctx, KHttp2Sink* r) {
 KHttp2::KHttp2() {
 	//printf("new http2=[%p]\n", this);
 	memset(this, 0, sizeof(*this));
+	hpack.size = KGL_HTTP_V2_TABLE_SIZE;
+	hpack.free = KGL_HTTP_V2_TABLE_SIZE;
 	streams_index = (KHttp2Node**)malloc(sizeof(KHttp2Node*) * kgl_http_v2_index_size());
 	memset(streams_index, 0, sizeof(KHttp2Node*) * kgl_http_v2_index_size());
 	klist_init(&active_queue);
@@ -159,14 +170,10 @@ KHttp2::~KHttp2() {
 	kassert(klist_empty(&active_queue));
 }
 bool KHttp2::send_settings_ack() {
-	int len = 0;
-	http2_buff* buf = new http2_buff;
-	buf->data = (char*)malloc(len + sizeof(http2_frame_header));
-	buf->used = len + sizeof(http2_frame_header);
-	memset(buf->data, 0, len + sizeof(http2_frame_header));
-	http2_frame_header* h = (http2_frame_header*)buf->data;
-	h->set_length_type(len, KGL_HTTP_V2_SETTINGS_FRAME);
-	h->flags = KGL_HTTP_V2_ACK_FLAG;
+	http2_buff* buf = get_frame(0, 0, KGL_HTTP_V2_SETTINGS_FRAME, KGL_HTTP_V2_ACK_FLAG);
+	if (buf == NULL) {
+		return false;
+	}
 	write_buffer.push(buf);
 	start_write();
 	return true;
@@ -177,14 +184,11 @@ bool KHttp2::send_settings() {
 		setting_frame_count++;
 	}
 	int len = (sizeof(http2_frame_setting)) * setting_frame_count;
-	http2_buff* buf = new http2_buff;
-	buf->data = (char*)malloc(len + sizeof(http2_frame_header));
-	buf->used = len + sizeof(http2_frame_header);
-	memset(buf->data, 0, len + sizeof(http2_frame_header));
-	http2_frame_header* h = (http2_frame_header*)buf->data;
-	h->set_length_type(len, KGL_HTTP_V2_SETTINGS_FRAME);
-
-	http2_frame_setting* setting = (http2_frame_setting*)(h + 1);
+	http2_buff* buf = get_frame(0, len, KGL_HTTP_V2_SETTINGS_FRAME, 0);
+	if (buf == NULL) {
+		return false;
+	}
+	http2_frame_setting* setting = (http2_frame_setting*)(buf->data + sizeof(http2_frame_header));
 	setting->id = htons(KGL_HTTP_V2_MAX_STREAMS_SETTING);
 	setting->value = htonl((uint32_t)max_stream);
 	if (KGL_HTTP_V2_STREAM_RECV_WINDOW != KGL_HTTP_V2_DEFAULT_WINDOW) {
@@ -210,6 +214,9 @@ bool KHttp2::send_window_update(uint32_t sid, size_t window) {
 	}
 	//printf("stream id=[%d] send windows update [%d]\n", sid, window);
 	http2_buff* buf = get_frame(sid, sizeof(http2_frame_window_update), KGL_HTTP_V2_WINDOW_UPDATE_FRAME, 0);
+	if (buf == NULL) {
+		return false;
+	}
 	http2_frame_window_update* b = (http2_frame_window_update*)(buf->data + sizeof(http2_frame_header));
 	b->inc_size = htonl((uint32_t)window);
 	buf->tcp_nodelay = 1;
@@ -221,7 +228,7 @@ u_char* KHttp2::close(bool read, int status) {
 	//printf("%lld http2 [%p] close read=[%d] status=[%d]\n", kgl_current_sec,this,read,status);
 	http2_buff* buf = NULL;
 	if (!read && write_buffer.getBufferSize() > 0) {
-		//write³ö´í£¬ÇåÀíÕıÔÚĞ´µÄbuffer
+		//writeå‡ºé”™ï¼Œæ¸…ç†æ­£åœ¨å†™çš„buffer
 		buf = write_buffer.clean();
 	}
 	KHttp2Node* node;
@@ -244,7 +251,7 @@ u_char* KHttp2::close(bool read, int status) {
 			read_event = stream->read_wait;
 			stream->read_wait = NULL;
 			if (stream->write_wait && !IS_WRITE_WAIT_FOR_WRITING(stream->write_wait)) {
-				//WAIT_FOR_WRITINGµÄÓÉremove_buffÇåÀí
+				//WAIT_FOR_WRITINGçš„ç”±remove_buffæ¸…ç†
 				write_event = stream->write_wait;
 				stream->write_wait = NULL;
 			} else {
@@ -264,7 +271,7 @@ u_char* KHttp2::close(bool read, int status) {
 	if (buf) {
 		KHttp2WriteBuffer::remove_buff(buf, true);
 	}
-	//read_processing/write_processing  Òª×îºóÖÃ0¡£
+	//read_processing/write_processing  è¦æœ€åç½®0ã€‚
 	closed = 1;
 	KBIT_SET(c->st.base.st_flags, STF_ERR);
 	if (read) {
@@ -458,7 +465,10 @@ u_char* KHttp2::state_process_header(u_char* pos, u_char* end) {
 	}
 #endif	
 	r = state.stream->sink;
-	r->parse_header(header->name.data, (int)header->name.len, header->value.data, (int)header->value.len);
+	if (!r->parse_header(header->name.data, (int)header->name.len,
+		header->value.data, (int)header->value.len)) {
+		terminate_stream(stream, KGL_HTTP_V2_PROTOCOL_ERROR);
+	}
 	return state_header_complete(pos, end);
 }
 
@@ -563,7 +573,7 @@ bool KHttp2::on_header_success(KHttp2Context* stream) {
 		if (stream->is_100_continue) {
 			stream->is_100_continue = 0;
 			if (stream->read_wait) {
-				//²»ÄÜÉ¾³ıread_wait,ÒòÎª»¹Òª¼ÌĞø¶Á.
+				//ä¸èƒ½åˆ é™¤read_wait,å› ä¸ºè¿˜è¦ç»§ç»­è¯».
 				stream->read_wait->on_read(0);
 			}
 			return true;
@@ -580,8 +590,8 @@ bool KHttp2::on_header_success(KHttp2Context* stream) {
 		}
 	}
 	//printf("%lld http2=[%p] stream=[%d] header complete\n", kgl_current_sec,this, stream->node->id);
-	//clientÄ£Ê½ÖĞÔÚµÈ´ı¶ÁheaderµÄ¹ı³ÌÖĞ£¬ÓĞ¿ÉÄÜ¾Í»á±»¿Í»§¶Ëconnection broken¶øµ¼ÖÂshutdown.
-	//¶ø·¢ÉústreamÒÑ¾­±»ÊÍ·ÅÊ±£¬stream->request»á±ä³ÉÎŞĞ§
+	//clientæ¨¡å¼ä¸­åœ¨ç­‰å¾…è¯»headerçš„è¿‡ç¨‹ä¸­ï¼Œæœ‰å¯èƒ½å°±ä¼šè¢«å®¢æˆ·ç«¯connection brokenè€Œå¯¼è‡´shutdown.
+	//è€Œå‘ç”Ÿstreamå·²ç»è¢«é‡Šæ”¾æ—¶ï¼Œstream->requestä¼šå˜æˆæ— æ•ˆ
 	if (client_model || stream->parsed_header) {
 		state.stream = NULL;
 		kgl_http2_event* read_wait = stream->read_wait;
@@ -596,8 +606,8 @@ bool KHttp2::on_header_success(KHttp2Context* stream) {
 	if (!KBIT_TEST(stream->sink->data.flags, RQ_HAS_CONTENT_LEN) && !stream->in_closed) {
 		stream->sink->data.left_read = -1;
 	}
-	//serverÄ£Ê½£¬µ÷ÓÃÁËparsed_header£¬¾ÍÒªµ÷ÓÃhandleStartRequest
-	//·ñÔò»áÔç³ÉstreamĞ¹Â©
+	//serveræ¨¡å¼ï¼Œè°ƒç”¨äº†parsed_headerï¼Œå°±è¦è°ƒç”¨handleStartRequest
+	//å¦åˆ™ä¼šæ—©æˆstreamæ³„æ¼
 	stream->parsed_header = 1;
 	assert(processing >= 0);
 	katom_inc((void*)&processing);
@@ -763,6 +773,10 @@ void KHttp2::goaway(int error_code) {
 	//printf("self_goaway\n");
 	self_goaway = 1;
 	http2_buff* buf = get_frame(0, sizeof(http2_frame_goaway), KGL_HTTP_V2_GOAWAY_FRAME, 0);
+	if (buf == NULL) {
+		selectable_shutdown(&c->st);
+		return;
+	}
 	http2_frame_goaway* b = (http2_frame_goaway*)(buf->data + sizeof(http2_frame_header));
 	b->last_stream_id = htonl(last_peer_sid);
 	b->error_code = htonl(error_code);
@@ -780,6 +794,10 @@ void KHttp2::ping() {
 	//printf("ping\n");
 	pinged = 1;
 	http2_buff* buf = get_frame(0, sizeof(http2_frame_ping), KGL_HTTP_V2_PING_FRAME, 0);
+	if (buf == NULL) {
+		selectable_shutdown(&c->st);
+		return;
+	}
 	http2_frame_ping* b = (http2_frame_ping*)(buf->data + sizeof(http2_frame_header));
 	b->opaque = time(NULL);
 	buf->tcp_nodelay = 1;
@@ -807,17 +825,20 @@ void KHttp2::write_end(KHttp2Context* ctx) {
 		send_header(ctx, true);
 		return;
 	}
-	//Ö»ÓĞ²»Ã÷³¤¶È£¬²ÅĞèÒªµ÷ÓÃwrite_end
+	//åªæœ‰ä¸æ˜é•¿åº¦ï¼Œæ‰éœ€è¦è°ƒç”¨write_end
 	assert(ctx->content_left == -1);
 	//printf("ctx id=[%d] out_closed\n", ctx->node->id);	
 	http2_buff* new_buf = get_frame(ctx->node->id, 0, KGL_HTTP_V2_DATA_FRAME, (ctx->send_header ? 0 : KGL_HTTP_V2_END_STREAM_FLAG));
+	if (new_buf == NULL) {
+		return;
+	}
 	new_buf->tcp_nodelay = 1;
 	write_buffer.push(new_buf);
 	if (ctx->send_header) {
 		assert(ctx->write_trailer);
 		send_header(ctx, true);
 		assert(ctx->out_closed);
-		//send_header ÀïÃæ»áµ÷ÓÃstart_write,ÒÔ¼°ÉèÖÃout_closed=1
+		//send_header é‡Œé¢ä¼šè°ƒç”¨start_write,ä»¥åŠè®¾ç½®out_closed=1
 		return;
 	}
 	ctx->out_closed = 1;
@@ -997,8 +1018,8 @@ bool KHttp2::terminate_stream(KHttp2Context* ctx, uint32_t status) {
 		ctx->out_closed = 1;
 		ctx->rst = 1;
 		if (ctx->node && read_processing) {
-			//ÔÚhttp2µÄclientÄ£Ê½ÖĞ£¬ÓĞ¿ÉÄÜctx->node»¹Î´³õÊ¼»¯¡£
-			//ÒòÎªctx->nodeÊÇÊµ¼Êwrite»òreadÊ±£¬½øĞĞ³õÊ¼»¯¡£
+			//åœ¨http2çš„clientæ¨¡å¼ä¸­ï¼Œæœ‰å¯èƒ½ctx->nodeè¿˜æœªåˆå§‹åŒ–ã€‚
+			//å› ä¸ºctx->nodeæ˜¯å®é™…writeæˆ–readæ—¶ï¼Œè¿›è¡Œåˆå§‹åŒ–ã€‚
 			send_flag = send_rst_stream(ctx->node->id, status);
 		}
 	}
@@ -1054,6 +1075,9 @@ bool KHttp2::send_altsvc(KHttp2Context* ctx, const char* val, int val_len) {
 		return false;
 	}
 	http2_buff* buf = get_frame(ctx->node->id, sizeof(http2_frame_altsvc) + val_len, KGL_HTTP_V2_ALTSVC_FRAME, KGL_HTTP_V2_NO_FLAG);
+	if (buf == NULL) {
+		return false;
+	}
 	http2_frame_altsvc* b = (http2_frame_altsvc*)(buf->data + sizeof(http2_frame_header));
 	b->origin_length = 0;
 	b += 1;
@@ -1372,8 +1396,10 @@ int KHttp2::read(KHttp2Context* http2_ctx, char* buf, int len) {
 		if (http2_ctx->out_closed == 0 && (!http2_ctx->has_upgrade || http2_ctx->has_expect)) {
 			http2_ctx->out_closed = 1;
 			http2_buff* new_buf = get_frame(http2_ctx->node->id, 0, KGL_HTTP_V2_DATA_FRAME, KGL_HTTP_V2_END_STREAM_FLAG);
-			new_buf->tcp_nodelay = 1;
-			write_buffer.push(new_buf);
+			if (new_buf) {
+				new_buf->tcp_nodelay = 1;
+				write_buffer.push(new_buf);
+			}
 		}
 	}
 #endif
@@ -1566,6 +1592,10 @@ u_char* KHttp2::state_head(u_char* pos, u_char* end) {
 u_char* KHttp2::state_data(u_char* pos, u_char* end) {
 	KHttp2Node* node;
 	KHttp2Context* stream;
+	if (state.sid == 0) {
+		klog(KLOG_WARNING, "client sent DATA frame with stream identifier 0\n");
+		return this->close(true, KGL_HTTP_V2_PROTOCOL_ERROR);
+	}
 
 	if (state.flags & KGL_HTTP_V2_PADDED_FLAG) {
 		if (state.length == 0) {
@@ -1810,18 +1840,11 @@ u_char* KHttp2::state_headers(u_char* pos, u_char* end) {
 		return state_header_block(pos, end);
 	}
 #endif
-	if (state.sid % 2 == 0 || state.sid < last_peer_sid) {
+	if (state.sid == 0 || state.sid % 2 == 0) {
 		klog(KLOG_WARNING, "http2 client sent HEADERS frame with incorrect identifier "
 			"%u, the last was %u\n", state.sid, last_peer_sid);
 		return this->close(true, KGL_HTTP_V2_PROTOCOL_ERROR);
 	}
-	if (self_goaway) {
-		if (!send_rst_stream(state.sid, KGL_HTTP_V2_NO_ERROR)) {
-			return this->close(true, KGL_HTTP_V2_INTERNAL_ERROR);
-		}
-		return state_skip_headers(pos, end);
-	}
-	last_peer_sid = state.sid;
 	if (depend == state.sid) {
 		klog(KLOG_WARNING,
 			"client sent HEADERS frame for stream %u "
@@ -1832,26 +1855,45 @@ u_char* KHttp2::state_headers(u_char* pos, u_char* end) {
 		}
 		return state_skip_headers(pos, end);
 	}
-	node = get_node(state.sid, true);
-	if (node == NULL) {
-		return this->close(true, KGL_HTTP_V2_INTERNAL_ERROR);
-	}
-	if (node->stream) {
-		//assert(node->stream->read_trailer);
+	node = get_node(state.sid, false);
+	if (node != NULL && node->stream != NULL) {
 		stream = node->stream;
+		if (!(state.flags & KGL_HTTP_V2_END_STREAM_FLAG)) {
+			klog(KLOG_WARNING, "client sent trailer without END_STREAM for stream %u\n", state.sid);
+			if (!send_rst_stream(state.sid, KGL_HTTP_V2_PROTOCOL_ERROR)) {
+				return this->close(true, KGL_HTTP_V2_INTERNAL_ERROR);
+			}
+			return state_skip_headers(pos, end);
+		}
 		kassert(state.pool == NULL);
 		stream->RemoveQueue();
 		if (!stream->is_available() || stream->in_closed) {
 			klog(KLOG_WARNING, "http2 stream is not available [%d]\n", state.sid);
-			return state_skip(pos, end);
+			return state_skip_headers(pos, end);
 		}
 		state.pool = stream->sink->pool;
 		state.keep_pool = 1;
 		kassert(state.pool);
 		kassert(state.stream == NULL);
 		state.stream = stream;
-		stream->in_closed = state.flags & KGL_HTTP_V2_END_STREAM_FLAG;
+		stream->in_closed = 1;
 		return state_header_block(pos, end);
+	}
+	if (state.sid <= last_peer_sid) {
+		klog(KLOG_WARNING, "http2 client tried to reopen stream %u, the last was %u\n",
+			state.sid, last_peer_sid);
+		return this->close(true, KGL_HTTP_V2_PROTOCOL_ERROR);
+	}
+	if (self_goaway) {
+		if (!send_rst_stream(state.sid, KGL_HTTP_V2_NO_ERROR)) {
+			return this->close(true, KGL_HTTP_V2_INTERNAL_ERROR);
+		}
+		return state_skip_headers(pos, end);
+	}
+	last_peer_sid = state.sid;
+	node = get_node(state.sid, true);
+	if (node == NULL) {
+		return this->close(true, KGL_HTTP_V2_INTERNAL_ERROR);
 	}
 	assert(state.pool == NULL);
 	state.pool = kgl_create_pool(KGL_REQUEST_POOL_SIZE);
@@ -1901,6 +1943,9 @@ u_char* KHttp2::state_priority(u_char* pos, u_char* end) {
 		klog(KLOG_WARNING, "client sent PRIORITY frame for stream %u "
 			"with incorrect dependency\n", state.sid);
 
+		if (!send_rst_stream(state.sid, KGL_HTTP_V2_PROTOCOL_ERROR)) {
+			return this->close(true, KGL_HTTP_V2_INTERNAL_ERROR);
+		}
 		return state_complete(pos, end);
 	}
 	return state_complete(pos, end);
@@ -1980,7 +2025,11 @@ u_char* KHttp2::state_rst_stream(u_char* pos, u_char* end) {
 	return state_complete(pos, end);
 }
 u_char* KHttp2::state_settings(u_char* pos, u_char* end) {
-	if (state.flags == KGL_HTTP_V2_ACK_FLAG) {
+	if (state.sid != 0) {
+		klog(KLOG_WARNING, "client sent SETTINGS frame with nonzero stream identifier\n");
+		return this->close(true, KGL_HTTP_V2_PROTOCOL_ERROR);
+	}
+	if (state.flags & KGL_HTTP_V2_ACK_FLAG) {
 		if (state.length != 0) {
 			klog(KLOG_WARNING, "client sent SETTINGS frame with the ACK flag and nonzero length\n");
 			return this->close(true, KGL_HTTP_V2_SIZE_ERROR);
@@ -1995,8 +2044,6 @@ u_char* KHttp2::state_settings(u_char* pos, u_char* end) {
 		klog(KLOG_WARNING, "client sent SETTINGS frame with incorrect length %u\n", state.length);
 		return this->close(true, KGL_HTTP_V2_SIZE_ERROR);
 	}
-
-	send_settings_ack();
 
 	return state_settings_params(pos, end);
 }
@@ -2081,13 +2128,26 @@ u_char* KHttp2::state_settings_params(u_char* pos, u_char* end) {
 			}
 			frame_size = (uint32_t)value;
 			break;
+		case KGL_HTTP_V2_ENABLE_PUSH_SETTING:
+			if (value > 1) {
+				klog(KLOG_WARNING, "client sent invalid ENABLE_PUSH value %u\n", value);
+				return this->close(true, KGL_HTTP_V2_PROTOCOL_ERROR);
+			}
+			break;
 		case KGL_HTTP_V2_ENABLE_CONNECT_SETTING:
+			if (value > 1) {
+				klog(KLOG_WARNING, "client sent invalid ENABLE_CONNECT_PROTOCOL value %u\n", value);
+				return this->close(true, KGL_HTTP_V2_PROTOCOL_ERROR);
+			}
 			enable_connect = !!value;
 			break;
 		default:
 			break;
 		}
 		pos += KGL_HTTP_V2_SETTINGS_PARAM_SIZE;
+	}
+	if (!send_settings_ack()) {
+		return this->close(true, KGL_HTTP_V2_ENHANCE_YOUR_CALM);
 	}
 	return state_complete(pos, end);
 }
@@ -2097,6 +2157,10 @@ u_char* KHttp2::state_push_promise(u_char* pos, u_char* end) {
 	return state_skip(pos, end);
 }
 u_char* KHttp2::state_ping(u_char* pos, u_char* end) {
+	if (state.sid != 0) {
+		klog(KLOG_WARNING, "client sent PING frame with nonzero stream identifier\n");
+		return this->close(true, KGL_HTTP_V2_PROTOCOL_ERROR);
+	}
 
 	if (state.length != KGL_HTTP_V2_PING_SIZE) {
 		klog(KLOG_WARNING, "client sent PING frame with incorrect length %u\n", state.length);
@@ -2111,14 +2175,19 @@ u_char* KHttp2::state_ping(u_char* pos, u_char* end) {
 	}
 	http2_buff* frame = get_frame(0, KGL_HTTP_V2_PING_SIZE, KGL_HTTP_V2_PING_FRAME, KGL_HTTP_V2_ACK_FLAG);
 	if (frame == NULL) {
-		klog(KLOG_ERR, "http2 get_frame is NULL\n");
-		return this->close(true, KGL_HTTP_V2_INTERNAL_ERROR);
+		return this->close(true, KGL_HTTP_V2_ENHANCE_YOUR_CALM);
 	}
+	memcpy(frame->data + sizeof(http2_frame_header), pos, KGL_HTTP_V2_PING_SIZE);
+	frame->tcp_nodelay = 1;
 	write_buffer.push(frame);
 	start_write();
 	return state_complete(pos + KGL_HTTP_V2_PING_SIZE, end);
 }
 u_char* KHttp2::state_goaway(u_char* pos, u_char* end) {
+	if (state.sid != 0) {
+		klog(KLOG_WARNING, "client sent GOAWAY frame with nonzero stream identifier\n");
+		return this->close(true, KGL_HTTP_V2_PROTOCOL_ERROR);
+	}
 	if (state.length < KGL_HTTP_V2_GOAWAY_SIZE) {
 		klog(KLOG_WARNING, "client sent GOAWAY frame with incorrect length %u\n", state.length);
 		return this->close(true, KGL_HTTP_V2_SIZE_ERROR);
@@ -2149,6 +2218,16 @@ u_char* KHttp2::state_window_update(u_char* pos, u_char* end) {
 	window = kgl_http_v2_parse_window(pos);
 
 	pos += KGL_HTTP_V2_WINDOW_UPDATE_SIZE;
+	if (window == 0) {
+		klog(KLOG_WARNING, "client sent WINDOW_UPDATE frame with zero increment\n");
+		if (state.sid == 0) {
+			return this->close(true, KGL_HTTP_V2_PROTOCOL_ERROR);
+		}
+		if (!send_rst_stream(state.sid, KGL_HTTP_V2_PROTOCOL_ERROR)) {
+			return this->close(true, KGL_HTTP_V2_INTERNAL_ERROR);
+		}
+		return state_complete(pos, end);
+	}
 
 	//printf("http2 WINDOW_UPDATE frame sid:%u window:%u\n",state.sid, window);
 
@@ -2160,7 +2239,7 @@ u_char* KHttp2::state_window_update(u_char* pos, u_char* end) {
 		}
 		stream = node->stream;
 
-		if (window > (size_t)(KGL_HTTP_V2_MAX_WINDOW - stream->send_window)) {
+		if ((int64_t)stream->send_window + (int64_t)window > KGL_HTTP_V2_MAX_WINDOW) {
 			klog(KLOG_WARNING,
 				"client violated flow control for stream %ui: "
 				"received WINDOW_UPDATE frame "
@@ -2179,7 +2258,7 @@ u_char* KHttp2::state_window_update(u_char* pos, u_char* end) {
 		return state_complete(pos, end);
 	}
 
-	if (window > KGL_HTTP_V2_MAX_WINDOW - send_window) {
+	if ((int64_t)send_window + (int64_t)window > KGL_HTTP_V2_MAX_WINDOW) {
 		klog(KLOG_WARNING,
 			"client violated connection flow control: "
 			"received WINDOW_UPDATE frame "
@@ -2190,10 +2269,10 @@ u_char* KHttp2::state_window_update(u_char* pos, u_char* end) {
 		return this->close(true, KGL_HTTP_V2_FLOW_CTRL_ERROR);
 	}
 	if (send_window <= 0) {
-		send_window += (uint32_t)window;
+		send_window += (int)window;
 		check_write_wait();
 	} else {
-		send_window += (uint32_t)window;
+		send_window += (int)window;
 	}
 	return state_complete(pos, end);
 }
@@ -2214,6 +2293,9 @@ u_char* KHttp2::state_altsvc(u_char* pos, u_char* end) {
 }
 bool KHttp2::send_rst_stream(uint32_t sid, uint32_t status) {
 	http2_buff* buf = get_frame(sid, sizeof(http2_frame_rst_stream), KGL_HTTP_V2_RST_STREAM_FRAME, KGL_HTTP_V2_NO_FLAG);
+	if (buf == NULL) {
+		return false;
+	}
 	buf->tcp_nodelay = 1;
 	http2_frame_rst_stream* b = (http2_frame_rst_stream*)(buf->data + sizeof(http2_frame_header));
 	b->status = htonl(status);
@@ -2245,7 +2327,7 @@ void KHttp2::ReleaseStateStream() {
 		if (state.stream->sink) {
 			KSink* rq = state.stream->sink;
 #ifndef NDEBUG
-			//µ÷ÊÔÄ£Ê½Ê±£¬~KHttp2SinkÀïÃæ»á¶ÔctxÓĞ¼ì²é¡£
+			//è°ƒè¯•æ¨¡å¼æ—¶ï¼Œ~KHttp2Sinké‡Œé¢ä¼šå¯¹ctxæœ‰æ£€æŸ¥ã€‚
 			KHttp2Sink* sink = static_cast<KHttp2Sink*>(rq);
 			sink->ctx = NULL;
 #endif

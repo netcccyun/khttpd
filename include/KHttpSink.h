@@ -96,7 +96,11 @@ public:
 			return buffer.buf + buffer.used;
 		}
 		{
-			int new_size = buffer.buf_size * 2;
+			if (buffer.buf_size >= MAX_HTTP_HEAD_SIZE) {
+				*size = 0;
+				return nullptr;
+			}
+			int new_size = KGL_MIN(buffer.buf_size * 2, MAX_HTTP_HEAD_SIZE);
 			char* nb = (char*)xmalloc(new_size);
 			kgl_memcpy(nb, buffer.buf, buffer.used);
 			ptrdiff_t delta_point = nb - buffer.buf;
@@ -198,6 +202,9 @@ private:
 		for (;;) {
 			memset(&rs, 0, sizeof(rs));
 			kgl_parse_result result = khttp_parse(parser, &parserd_hot, end, &rs);
+			if (parser->header_len > MAX_HTTP_HEAD_SIZE) {
+				return kgl_parse_error;
+			}
 			assert(parserd_hot >= buffer.buf && parserd_hot <= end);
 			//printf("len=[%d],result=[%d]\n", len,result);
 			switch (result) {
@@ -206,7 +213,7 @@ private:
 				if (kgl_current_msec - data.begin_time_msec > 60000) {
 					return kgl_parse_error;
 				}
-				if (parser->header_len > MAX_HTTP_HEAD_SIZE) {
+				if ((size_t)parser->header_len + (size_t)(end - parserd_hot) >= MAX_HTTP_HEAD_SIZE) {
 					return kgl_parse_error;
 				}
 				//ks_save_point(&buffer, hot);
@@ -243,4 +250,3 @@ private:
 	}
 };
 #endif
-

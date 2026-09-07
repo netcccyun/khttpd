@@ -94,7 +94,8 @@ public:
 	int used;
 	int skip_data_free:1;
 	int sendfile : 1;
-	int tcp_nodelay : 1;	
+	int tcp_nodelay : 1;
+	int counted : 1;
 	KHttp2Context *ctx;
 	http2_buff *next;
 };
@@ -265,6 +266,10 @@ public:
 					tcp_no_cork_at_empty = 1;
 				}
 #endif
+				if (header->counted) {
+					assert(counted_frames > 0);
+					counted_frames--;
+				}
 				http2_buff *next = header->next;
 				header->next = remove_list;
 				remove_list = header;
@@ -297,6 +302,10 @@ public:
 	int getBufferSize()
 	{		
 		return left;
+	}
+	int getCountedFrames()
+	{
+		return counted_frames;
 	}
 	bool is_sendfile() {
 		assert(header);
@@ -347,6 +356,7 @@ private:
 #endif
 		assert(header == NULL);
 		assert(left == 0);
+		assert(counted_frames == 0);
 		last = NULL;
 		hot = NULL;
 	}
@@ -366,6 +376,9 @@ private:
 	void add(http2_buff *buf)
 	{
 		left += buf->used;
+		if (buf->counted) {
+			counted_frames++;
+		}
 		if (last==NULL) {
 			assert(header==NULL);
 			last = header = buf;
@@ -380,6 +393,7 @@ private:
 	http2_buff *header;
 	char *hot;
 	int left;
+	int counted_frames;
 #ifdef ENABLE_HTTP2_TCP_CORK
 	uint16_t tcp_cork : 1;
 	uint16_t tcp_no_cork_at_empty : 1;
