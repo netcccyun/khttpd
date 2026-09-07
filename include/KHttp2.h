@@ -142,8 +142,11 @@ bool kgl_http_v2_huff_decode(u_char* state, u_char* src, size_t len, u_char** ds
 #define KGL_HTTP_V2_MAX_HEADER_LIST_SIZE_SETTING 0x6
 #define KGL_HTTP_V2_ENABLE_CONNECT_SETTING       0x8
 #define KGL_HTTP_V2_FRAME_BUFFER_SIZE            24
+/* outstanding control frames queued in write_buffer (PING/SETTINGS/RST/...) */
+#define KGL_HTTP_V2_MAX_FRAMES                   256
 
 #define KGL_HTTP_V2_DEFAULT_FRAME_SIZE           (1 << 14)
+#define KGL_HTTP_V2_TABLE_SIZE                   4096
 
 #define KGL_HTTP_V2_MAX_WINDOW                   ((1U << 31) - 1)
 #define KGL_HTTP_V2_DEFAULT_WINDOW               65535
@@ -576,6 +579,7 @@ private:
 	//void destroy();
 	kev_result start_read();
 	kev_result start_write();
+	http2_buff* get_frame(uint32_t sid, size_t length, uint8_t type, u_char flags);
 	void ping();
 	void goaway(int error_code);
 	KHttp2Context* create_stream();
@@ -665,4 +669,3 @@ private:
 };
 #endif
 #endif
-

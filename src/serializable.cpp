@@ -1,6 +1,7 @@
 #include "serializable.h"
 namespace kgl {
 	static void build_json_string(wstream& s, const string& v) {
+		static const char hex[] = "0123456789abcdef";
 		s << "\""_CS;
 		for (size_t i = 0; i < v.size(); ++i) {
 			switch (v[i]) {
@@ -18,19 +19,39 @@ namespace kgl {
 				s << "\\" << v[i];
 				break;
 			default:
-				s << v[i];
+				if ((unsigned char)v[i] < 0x20) {
+					s << "\\u00";
+					s << hex[((unsigned char)v[i]) >> 4];
+					s << hex[((unsigned char)v[i]) & 0x0f];
+				} else {
+					s << v[i];
+				}
 				break;
 			}
 		}
 		s << "\""_CS;
 	}
 	static void build_xml_text(wstream& s, const string& v) {
-		if (v.find('<') != string::npos) {
-			s << "<![CDATA[" << v << "]]>";
-			return;
+		for (size_t i = 0; i < v.size(); ++i) {
+			switch (v[i]) {
+			case '&':
+				s << "&amp;";
+				break;
+			case '<':
+				s << "&lt;";
+				break;
+			case '>':
+				s << "&gt;";
+				break;
+			default:
+				if ((unsigned char)v[i] < 0x20 && v[i] != '\t' && v[i] != '\r' && v[i] != '\n') {
+					s << "&#xfffd;";
+				} else {
+					s << v[i];
+				}
+				break;
+			}
 		}
-		s << v;
-		return;
 	}
 	static inline void build_xml_attribute(wstream& s, const string& v) {
 		build_json_string(s, v);
@@ -76,6 +97,7 @@ namespace kgl {
 	}
 	void data_value::build(const string& name, wstream& s, format fmt) {
 		switch (fmt) {
+		case format::xml_attribute:
 		case format::xml_text:
 			switch (type) {
 			case data_type::OBJ:
@@ -224,7 +246,7 @@ namespace kgl {
 			//[[fallthrough]];
 		case data_type::OBJ_ARRAY:
 			dv->objs->emplace_back();
-			return &(*(dv->objs->rend()));
+			return &dv->objs->back();
 		default:
 			break;
 		}
@@ -316,6 +338,13 @@ namespace kgl {
 		return *this;
 	}
 	serializable& serializable::operator = (const serializable& a) {
+		if (this == &a) {
+			return *this;
+		}
+		for (auto it = data.begin(); it != data.end(); ++it) {
+			(*it).second->release();
+		}
+		data.clear();
 		this->data = a.data;
 		for (auto it = data.begin(); it != data.end(); ++it) {
 			(*it).second->add_ref();

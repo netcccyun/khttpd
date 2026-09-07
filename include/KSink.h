@@ -348,16 +348,18 @@ public:
 				//klog(KLOG_DEBUG, "httpparse:cann't parse meth=[%s]\n", attr);
 				return false;
 			}
+			u_char* val_end = (u_char*)val + val_len;
 			u_char* space = (u_char*)memchr(val, ' ', val_len);
 			if (space == NULL) {
 				//klog(KLOG_DEBUG, "httpparse:cann't get space seperator to parse HTTP/1.1 [%s]\n", val);
 				return false;
 			}
-			*space = 0;
 			size_t url_len = space - (u_char*)val;
-			while (*space && IS_SPACE(*space)) {
-				space++;
+			u_char* version = space;
+			while (version < val_end && IS_SPACE(*version)) {
+				version++;
 			}
+			*space = 0;
 			switch (data.meth) {
 			case METH_CONNECT:
 				if (!data.parse_connect_url((u_char*)val, url_len)) {
@@ -370,7 +372,7 @@ public:
 					return false;
 				}
 			}
-			if (!data.parse_http_version(space, val_len - url_len)) {
+			if (!data.parse_http_version(version, (size_t)(val_end - version))) {
 				//klog(KLOG_DEBUG, "httpparse:cann't parse http version [%s]\n", space);
 				return false;
 			}
@@ -433,9 +435,7 @@ public:
 				return data.add_header(pool, kgl_header_connection, val, val_len);
 			}
 			if (kgl_mem_case_same(attr, attr_len, kgl_expand_string("Content-length"))) {
-				data.left_read = string2int(val);
-				data.flags |= RQ_HAS_CONTENT_LEN;
-				return true;
+				return data.parse_content_length(val, val_len);
 			}
 			if (kgl_mem_case_same(attr, attr_len, kgl_expand_string("Cache-Control"))) {
 				KHttpFieldValue field(val, val + val_len);
@@ -541,10 +541,12 @@ public:
 		case 'T':
 		case 't':
 			if (kgl_mem_case_same(attr, attr_len, kgl_expand_string("Transfer-Encoding"))) {
-				if (kgl_mem_case_same(val, val_len, kgl_expand_string("chunked"))) {
-					KBIT_SET(data.flags, RQ_INPUT_CHUNKED);
-					data.left_read = -1;
+				if (!kgl_mem_case_same(val, val_len, kgl_expand_string("chunked")) ||
+					KBIT_TEST(data.flags, RQ_HAS_CONTENT_LEN)) {
+					return false;
 				}
+				KBIT_SET(data.flags, RQ_INPUT_CHUNKED);
+				data.left_read = -1;
 				return true;
 			}
 			break;

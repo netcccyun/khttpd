@@ -12,7 +12,7 @@ class KHttpFieldValue
 {
 public:
 	KHttpFieldValue(const char* val, const char* end) {
-		while (val > end && isspace((unsigned char)*val)) {
+		while (val < end && isspace((unsigned char)*val)) {
 			val++;
 		}
 		this->val = val;

@@ -87,6 +87,10 @@ KGL_RESULT KHttpUpstream::read_header()
 		for (;;) {
 			memset(&rs, 0, sizeof(rs));
 			kgl_parse_result parse_result = khttp_parse(&parser, &hot, end, &rs);
+			if (parser.header_len > MAX_HTTP_HEAD_SIZE) {
+				result = KGL_EDATA_FORMAT;
+				goto out;
+			}
 			switch (parse_result) {
 			case kgl_parse_continue:
 			{
@@ -94,7 +98,7 @@ KGL_RESULT KHttpUpstream::read_header()
 					result = KGL_EIO;
 					goto out;
 				}
-				if (parser.header_len > MAX_HTTP_HEAD_SIZE) {
+				if ((size_t)parser.header_len + (size_t)(end - hot) >= MAX_HTTP_HEAD_SIZE) {
 					result = KGL_EDATA_FORMAT;
 					goto out;
 				}
