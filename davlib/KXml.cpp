@@ -344,6 +344,9 @@ bool KXml::internelParseString(char* buf) {
 			} else if (strncmp(hot, "<!--", 4) == 0) {
 				//×¢ÊÍ
 				hot = strstr(hot + 4, "-->");
+				if (hot == NULL) {
+					throw KXmlException("cann't get comment end");
+				}
 				hot += 3;
 				continue;
 			} else {
