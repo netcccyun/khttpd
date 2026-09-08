@@ -107,7 +107,7 @@ public:
 		}
 		if (body_len > 0) {
 			ks_buffer* buffer = ks_buffer_new((int)(body_len + 1));
-			if (!read_all(buffer->buf, (int)body_len)) {
+			if (read_all(buffer->buf, (int)body_len) != body_len) {
 				ks_buffer_destroy(buffer);
 				result = KGL_ESOCKET_BROKEN;
 				return nullptr;
@@ -133,7 +133,13 @@ public:
 			}
 			if (got == 0) {
 				ks_write_str(buffer, "\0", 1);
+				result = KGL_OK;
 				return buffer;
+			}
+			if (buffer->used > max_body_len - got) {
+				ks_buffer_destroy(buffer);
+				result = KGL_EINSUFFICIENT_BUFFER;
+				return nullptr;
 			}
 			ks_write_success(buffer, got);
 		}
@@ -191,4 +197,3 @@ private:
 	KWebDavClient* client;
 };
 #endif
-

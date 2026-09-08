@@ -488,6 +488,13 @@ public:
 				}
 				return true;
 			}
+			if (kgl_mem_case_same(attr, attr_len, kgl_expand_string("If-Unmodified-Since"))) {
+				if (data.precondition.time == 0) {
+					data.precondition.time = kgl_parse_http_time((u_char*)val, val_len);
+					KBIT_SET(data.flags, RQ_IF_TIME | RQ_IF_MATCH_UNMODIFIED);
+				}
+				return true;
+			}
 			if (kgl_mem_case_same(attr, attr_len, kgl_expand_string("If-None-Match"))) {
 				data.precondition.entity = alloc_entity(val, val_len);
 				KBIT_CLR(data.flags, RQ_IF_TIME | RQ_IF_MATCH_UNMODIFIED);
