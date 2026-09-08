@@ -77,7 +77,7 @@ public:
 		return true;
 
 	}
-	void append(const char *str,uint16_t len)
+	void append(const char *str,int len)
 	{
 		char *data = (char *)malloc(len);
 		kgl_memcpy(data,str,len);
@@ -87,13 +87,13 @@ public:
 	{
 		add(buf,buf->used);
 	}
-	void insert(const char *str,uint16_t len)
+	void insert(const char *str,int len)
 	{
 		char *data = (char *)malloc(len);
 		kgl_memcpy(data,str,len);
 		pushHead(data,len);
 	}
-	void pushHead(char *str,uint16_t len)
+	void pushHead(char *str,int len)
 	{
 		if (header==NULL) {
 			pushEnd(str,len);
@@ -109,7 +109,7 @@ public:
 		hot = t->data;
 		total_len += len;
 	}
-	void pushEnd(char *str,uint16_t len)
+	void pushEnd(char *str,int len)
 	{
 		kbuf *t = (kbuf *)xmalloc(sizeof(kbuf));
 		memset(t,0,sizeof(kbuf));

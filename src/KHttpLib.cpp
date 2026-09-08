@@ -1325,14 +1325,17 @@ bool kgl_adjust_range(kgl_request_range* range, int64_t* len) 	{
 			if ((*len) <= 0) {
 				return false;
 			}
-			return true;
 		}
-	} else if (range->from < 0) {
+	} else {
+		/* suffix-byte-range-spec: bytes=-N. RFC 7233: if N >= size, use the whole representation. */
 		range->from += *len;
-		if (range->from <= 0) {
-			return false;
+		if (range->from < 0) {
+			range->from = 0;
 		}
 		(*len) -= range->from;
+		if ((*len) <= 0) {
+			return false;
+		}
 	}
 	range->to = range->from + (*len) - 1;
 	return true;

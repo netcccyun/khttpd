@@ -57,9 +57,9 @@ http2_buff *KHttp2HeaderFrame::create(uint32_t stream_id,bool no_body, size_t ma
 			type = KGL_HTTP_V2_CONTINUATION_FRAME;
 			frame_size = 0;
 			http2_buff *hb = new http2_buff;
-			hb->data = (char *)malloc(sizeof(http2_frame_header));
+			hb->data = (char *)xmalloc(sizeof(http2_frame_header));
 			hb->used = sizeof(http2_frame_header);
-			memset(buf->data, 0, sizeof(http2_frame_header));
+			memset(hb->data, 0, sizeof(http2_frame_header));
 			h = (http2_frame_header *)hb->data;
 			last->next = hb;
 			last = hb;

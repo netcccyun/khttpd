@@ -8,11 +8,11 @@
 
 enum class KDechunkResult
 {
-	Success,//½âÂë³É¹¦£¬ÓĞÊı¾İ·µ»Ø£¬µ«Òª¼ÌĞø½âÂë
-	Continue,//½âÂë³É¹¦£¬ÎŞÊı¾İ·µ»Ø£¬Òª¼ÌĞøÎ¹Êı¾İ
-	Trailer,//½âÂë³É¹¦£¬·µ»ØµÄÊı¾İÊÇtrailer
-	End,//½âÂë³É¹¦£¬ÎŞÊı¾İ·µ»Ø£¬½âÂë½áÊø
-	Failed//½âÂë´íÎó
+	Success,//è§£ç æˆåŠŸï¼Œæœ‰æ•°æ®è¿”å›ï¼Œä½†è¦ç»§ç»­è§£ç 
+	Continue,//è§£ç æˆåŠŸï¼Œæ— æ•°æ®è¿”å›ï¼Œè¦ç»§ç»­å–‚æ•°æ®
+	Trailer,//è§£ç æˆåŠŸï¼Œè¿”å›çš„æ•°æ®æ˜¯trailer
+	End,//è§£ç æˆåŠŸï¼Œæ— æ•°æ®è¿”å›ï¼Œè§£ç ç»“æŸ
+	Failed//è§£ç é”™è¯¯
 };
 #define dechunk_success  KDechunkResult::Success
 #define dechunk_continue KDechunkResult::Continue
@@ -39,8 +39,8 @@ public:
 	{
 		chunk_size = KHTTPD_CHUNK_STATUS_READ_SIZE;
 	}
-	//piece_lengthÊÇin,out²ÎÊı£¬inÊ±Ö¸Ê¾×î´ó¿é³¤¶È
-	//Èç¹û·µ»ØµÄÊÇtrailerÊı¾İ£¬piece_length»áºöÂÔ´«½øÀ´µÄÖµ¡£
+	//piece_lengthæ˜¯in,outå‚æ•°ï¼Œinæ—¶æŒ‡ç¤ºæœ€å¤§å—é•¿åº¦
+	//å¦‚æœè¿”å›çš„æ˜¯traileræ•°æ®ï¼Œpiece_lengthä¼šå¿½ç•¥ä¼ è¿›æ¥çš„å€¼ã€‚
 	KDechunkResult dechunk(const char** buf, const char* end, const char** piece, int* piece_length);
 	KDechunkResult dechunk(const char** buf, int buf_len, const char** piece, int* piece_length) {
 		return dechunk(buf, (*buf) + buf_len, piece, piece_length);
@@ -94,6 +94,8 @@ public:
 			case KDechunkResult::End:
 				//assert((int)(dst - buf) >= 0);
 				return (int)(dst - buf);
+			case KDechunkResult::Trailer:
+				break;
 			default:
 				return -1;
 			}

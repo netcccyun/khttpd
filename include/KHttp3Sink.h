@@ -78,7 +78,7 @@ public:
 		build_header(header, name, name_len, val, val_len);
 		return true;
 	}
-	//·µ»ØÍ·³¤¶È,-1±íÊ¾³ö´í
+	//è¿”å›žå¤´é•¿åº¦,-1è¡¨ç¤ºå‡ºé”™
 	int internal_start_response_body(int64_t body_size,bool is_100_continue) override {
 		if (st == NULL) {
 			return -1;
@@ -137,23 +137,39 @@ public:
 	int write_all(const kbuf* buf, int length) override {
 #define KGL_RQ_WRITE_BUF_COUNT 64
 		kgl_iovec iovec_buf[KGL_RQ_WRITE_BUF_COUNT];
-		while (length > 0) {
+		int left = length;
+		while (left > 0 && buf) {
 			/* prepare iovec_buf */
+			int packed = 0;
 			int bc = 0;
-			for (; bc < KGL_RQ_WRITE_BUF_COUNT && length>0; ++bc) {
-				iovec_buf[bc].iov_len = KGL_MIN(length, buf->used);
+			for (; bc < KGL_RQ_WRITE_BUF_COUNT && left > 0 && buf; ++bc) {
+				while (buf && buf->used == 0) {
+					buf = buf->next;
+				}
+				if (buf == nullptr || buf->used < 0) {
+					break;
+				}
+				iovec_buf[bc].iov_len = KGL_MIN(left, buf->used);
 				iovec_buf[bc].iov_base = buf->data;
-				length -= iovec_buf[bc].iov_len;
+				packed += (int)iovec_buf[bc].iov_len;
+				left -= (int)iovec_buf[bc].iov_len;
 				buf = buf->next;
 			}
+			if (packed == 0) {
+				return left;
+			}
 			kgl_iovec* hot_buf = iovec_buf;
+			int remain = packed;
 			while (bc > 0) {
 				/* write iovec_buf */
 				int got = internal_write(hot_buf, bc);
 				if (got <= 0) {
-					return length;
+					return left + remain;
 				}
-				length -= got;
+				if (got > remain) {
+					return left + remain;
+				}
+				remain -= got;
 				/* see iovec_buf left data */
 				while (got > 0) {
 					if ((int)hot_buf->iov_len > got) {
@@ -161,13 +177,13 @@ public:
 						hot_buf->iov_base = (char*)(hot_buf->iov_base) + got;
 						break;
 					}
-					got -= hot_buf->iov_len;
+					got -= (int)hot_buf->iov_len;
 					hot_buf++;
 					bc--;
 				}
 			}
 		}
-		return 0;
+		return left;
 	}
 	int write_all(const char* str, int length) override {
 		while (length > 0) {
@@ -199,11 +215,14 @@ public:
 		ev[OP_WRITE].cd->f->wait(ev[OP_WRITE].cd, &got);
 		assert(!KBIT_TEST(st_flags, STF_WRITE));
 		assert(got == ev[OP_WRITE].result);
-		if (content_left > 0) {
-			content_left -= ev[OP_WRITE].result;
+		int result = ev[OP_WRITE].result;
+		if (result > 0) {
+			if (content_left > 0) {
+				content_left -= result;
+			}
+			add_down_flow(nullptr, result);
 		}
-		add_down_flow(nullptr, ev[OP_WRITE].result);
-		return ev[OP_WRITE].result;
+		return result;
 	}
 	void on_read(lsquic_stream_t* st);
 	void on_write(lsquic_stream_t* st);

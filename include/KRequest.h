@@ -27,7 +27,7 @@ class KRequestPlainData
 {
 public:
 	int64_t send_size;
-	//postÊı¾İ»¹Ê£¶àÉÙÊı¾İÃ»´¦Àí
+	//postæ•°æ®è¿˜å‰©å¤šå°‘æ•°æ®æ²¡å¤„ç†
 	int64_t left_read;
 	time_t min_obj_verified;
 	kgl_request_range* range;
@@ -67,7 +67,7 @@ public:
 	uint8_t state;
 	uint8_t meth;
 	/*
-	 * Ô­Ê¼url
+	 * åŸå§‹url
 	 */
 	KUrl raw_url;
 	KUrl* url;
@@ -117,16 +117,19 @@ protected:
 		return meth != METH_UNSET;
 	}
 	bool parse_connect_url(u_char* src, size_t len) {
-		u_char* ss = (u_char*)memchr(src, ':', len);
-		if (!ss) {
+		if (len == 0) {
 			return false;
 		}
 		assert(!raw_url.host);
 		KBIT_CLR(raw_url.flags, KGL_URL_ORIG_SSL);
-		KBIT_SET(raw_url.flags, KGL_URL_HAS_PORT);
-		raw_url.host = kgl_strndup((char*)src, ss - src);
-		len -= (ss - src);
-		raw_url.port = (uint16_t)kgl_atoi(ss + 1, len - 1);
+		if (!parse_url_host(&raw_url, (const char*)src, len)) {
+			return false;
+		}
+		if (!KBIT_TEST(raw_url.flags, KGL_URL_HAS_PORT) || raw_url.port == 0) {
+			xfree(raw_url.host);
+			raw_url.host = NULL;
+			return false;
+		}
 		return true;
 	}
 	bool parse_host(const char* val, size_t len) {

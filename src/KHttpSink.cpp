@@ -137,7 +137,7 @@ int KHttpSink::sendfile(kfiber_file* fp, int len) {
 	if (!result) {
 		return -1;
 	}
-	size2 = sizeof("\r\n");
+	size2 = 2;
 	if (!kfiber_net_write_full(cn, "\r\n", &size2)) {
 		return -1;
 	}

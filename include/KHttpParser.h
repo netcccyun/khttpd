@@ -40,7 +40,7 @@ INLINE kgl_parse_result khttp_parse_header(khttp_parser* parser, char* header, c
 		val = (char*)memchr(header, ':', end - header);
 	}
 	if (val == NULL) {
-		return kgl_parse_continue;
+		return kgl_parse_error;
 	}
 	*val = '\0';
 	val++;
@@ -81,28 +81,28 @@ restart:
 	}
 	if (parser->started) {
 		/*
-		 * ÎÒÃÇ»¹Òª¿´¿´Õâ¸öhttpÓòÓĞÃ»ÓĞ»»ĞĞ£¬¾İrfc2616.
+		 * æˆ‘ä»¬è¿˜è¦çœ‹çœ‹è¿™ä¸ªhttpåŸŸæœ‰æ²¡æœ‰æ¢è¡Œï¼Œæ®rfc2616.
 		 *        LWS            = [CRLF] 1*( SP | HT )
-		 *        ÎÒÃÇ»¹Òª¿´¿´ÏÂÒ»ĞĞµÚÒ»¸ö×Ö·ûÊÇ·ñÊÇ¿ÕĞĞ¡£
+		 *        æˆ‘ä»¬è¿˜è¦çœ‹çœ‹ä¸‹ä¸€è¡Œç¬¬ä¸€ä¸ªå­—ç¬¦æ˜¯å¦æ˜¯ç©ºè¡Œã€‚
 		 */
-		if (pn == end - 1) {
-			/*
-			 * Èç¹û\nÊÇ×îºóµÄ×Ö·û,ÔòÒªcontinue.
-			 */
-			return kgl_parse_continue;
-		}
-		/*
-		 * Èç¹ûÏÂÒ»ĞĞ¿ªÍ·×Ö·ûÊÇSP»òHT£¬ÔòÒª²¢ĞĞ´¦Àí¡£°Ñ\rºÍ\n¶¼»»³ÉSP
-		 */
-		while (pn[1] == ' ' || pn[1] == '\t') {
+		for (;;) {
+			/* å¦‚æœ\næ˜¯æœ€åçš„å­—ç¬¦,åˆ™è¦continue. */
+			if (pn + 1 >= end) {
+				return kgl_parse_continue;
+			}
+			/* å¦‚æœä¸‹ä¸€è¡Œå¼€å¤´å­—ç¬¦æ˜¯SPæˆ–HTï¼Œåˆ™è¦å¹¶è¡Œå¤„ç†ã€‚æŠŠ\rå’Œ\néƒ½æ¢æˆSP */
+			if (pn[1] != ' ' && pn[1] != '\t') {
+				break;
+			}
 			*pn = ' ';
 			int checked = (int)(pn + 1 - *start);
 			char* pr = (char*)memchr(*start, '\r', checked);
 			if (pr) {
 				*pr = ' ';
 			}
-			pn = (char*)memchr(pn, '\n', end - pn);
-			if (pn == NULL) {
+			char* next = pn + 1;
+			pn = (char*)memchr(next, '\n', end - next);
+			if (pn == NULL || pn + 1 >= end) {
 				return kgl_parse_continue;
 			}
 		}
@@ -121,4 +121,3 @@ restart:
 	return khttp_parse_header(parser, hot, pn, rs);
 }
 #endif
-

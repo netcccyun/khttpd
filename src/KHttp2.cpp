@@ -346,8 +346,21 @@ u_char* KHttp2::handle_continuation(u_char* pos, u_char* end, kgl_http_v2_handle
 		return this->close(true, KGL_HTTP_V2_PROTOCOL_ERROR);
 	}
 
-	state.length += kgl_http_v2_parse_length(head);
-	state.flags |= p[4];
+	if (++state.continuation_frames > KGL_HTTP_V2_MAX_CONTINUATIONS) {
+		klog(KLOG_WARNING, "http2 CONTINUATION flood detected\n");
+		return this->close(true, KGL_HTTP_V2_ENHANCE_YOUR_CALM);
+	}
+
+	{
+		uint32_t cont_len = kgl_http_v2_parse_length(head);
+		if (state.length > (uint32_t)0xffffffffu - cont_len) {
+			klog(KLOG_WARNING, "http2 CONTINUATION length overflow\n");
+			return this->close(true, KGL_HTTP_V2_ENHANCE_YOUR_CALM);
+		}
+		state.length += cont_len;
+	}
+	/* CONTINUATION only defines END_HEADERS; ignore reserved flags (RFC 9113). */
+	state.flags |= (uint8_t)(p[4] & KGL_HTTP_V2_END_HEADERS_FLAG);
 
 	if (state.sid != kgl_http_v2_parse_sid(&p[5])) {
 		klog(KLOG_WARNING,
@@ -1583,6 +1596,14 @@ u_char* KHttp2::state_head(u_char* pos, u_char* end) {
 	pos += sizeof(http2_frame_header);
 	type = kgl_http_v2_parse_type(head);
 	//printf("%lld http2=[%p] recv frame sid=[%d] type=[%d] flag=[%d] length=[%d]\n",kgl_current_sec, this,state.sid,type,state.flags,state.length);
+	if (type == KGL_HTTP_V2_HEADERS_FRAME || (type == KGL_HTTP_V2_DATA_FRAME && state.length > 0)) {
+		idle_frames = 0;
+	} else {
+		if (++idle_frames > KGL_HTTP_V2_MAX_IDLE_FRAMES) {
+			klog(KLOG_WARNING, "http2 flood detected, idle frames=%u\n", idle_frames);
+			return this->close(true, KGL_HTTP_V2_ENHANCE_YOUR_CALM);
+		}
+	}
 	if (type >= (int)KGL_HTTP_V2_FRAME_STATES) {
 		return state_skip(pos, end);
 	}
@@ -1623,16 +1644,21 @@ u_char* KHttp2::state_data(u_char* pos, u_char* end) {
 		state.length -= state.padding;
 	}
 
+	/* RFC 9113: flow control includes Pad Length and Padding. */
+	uint32_t window_size = state.length;
+	if (state.flags & KGL_HTTP_V2_PADDED_FLAG) {
+		window_size += 1 + state.padding;
+	}
 
-	if (state.length > recv_window) {
+	if (window_size > recv_window) {
 		klog(KLOG_WARNING,
 			"client violated connection flow control: "
 			"received DATA frame length %u, available window %u\n",
-			state.length, recv_window);
+			window_size, recv_window);
 		return this->close(true, KGL_HTTP_V2_FLOW_CTRL_ERROR);
 	}
 	bool send_window_flag = false;
-	recv_window -= state.length;
+	recv_window -= window_size;
 	if (recv_window < KGL_HTTP_V2_CONNECTION_RECV_WINDOW / 4) {
 		send_window_flag = send_window_update(0, KGL_HTTP_V2_CONNECTION_RECV_WINDOW - recv_window);
 		recv_window = KGL_HTTP_V2_CONNECTION_RECV_WINDOW;
@@ -1652,15 +1678,15 @@ u_char* KHttp2::state_data(u_char* pos, u_char* end) {
 		terminate_stream(stream, KGL_HTTP_V2_PROTOCOL_ERROR);
 		return state_skip_padded(pos, end);
 	}
-	if (state.length > stream->recv_window) {
+	if (window_size > stream->recv_window) {
 		klog(KLOG_INFO, "client violated flow control for stream %u: "
 			"received DATA frame length %u, available window %u",
-			node->id, state.length, stream->recv_window);
+			node->id, window_size, stream->recv_window);
 		terminate_stream(stream, KGL_HTTP_V2_FLOW_CTRL_ERROR);
 		return state_skip_padded(pos, end);
 	}
 
-	stream->recv_window -= state.length;
+	stream->recv_window -= window_size;
 	if (stream->in_closed) {
 		klog(KLOG_INFO, "client sent DATA frame for half-closed stream %u\n", node->id);
 		if (!terminate_stream(stream, KGL_HTTP_V2_STREAM_CLOSED) && send_window_flag) {
@@ -1715,7 +1741,7 @@ u_char* KHttp2::state_read_data(u_char* pos, u_char* end) {
 		if (stream->read_buffer == NULL) {
 			stream->read_buffer = new KSendBuffer();
 		}
-		stream->read_buffer->append((char*)pos, (uint16_t)size);
+		stream->read_buffer->append((char*)pos, (int)size);
 		kgl_http2_event* read_wait = stream->read_wait;
 		if (read_wait) {
 			assert(read_wait->fiber);
@@ -1758,6 +1784,8 @@ u_char* KHttp2::state_headers(u_char* pos, u_char* end) {
 	KHttp2Node* node;
 	KHttp2Context* stream;
 	state.header_length = 0;
+	state.continuation_frames = 0;
+	state.skip_field = 0;
 	padded = state.flags & KGL_HTTP_V2_PADDED_FLAG;
 	priority = state.flags & KGL_HTTP_V2_PRIORITY_FLAG;
 
@@ -1891,6 +1919,13 @@ u_char* KHttp2::state_headers(u_char* pos, u_char* end) {
 		return state_skip_headers(pos, end);
 	}
 	last_peer_sid = state.sid;
+	if ((uint32_t)katom_get((void*)&processing) >= max_stream) {
+		klog(KLOG_WARNING, "http2 refused stream %u, max_stream=%u\n", state.sid, max_stream);
+		if (!send_rst_stream(state.sid, KGL_HTTP_V2_REFUSED_STREAM)) {
+			return this->close(true, KGL_HTTP_V2_ENHANCE_YOUR_CALM);
+		}
+		return state_skip_headers(pos, end);
+	}
 	node = get_node(state.sid, true);
 	if (node == NULL) {
 		return this->close(true, KGL_HTTP_V2_INTERNAL_ERROR);
@@ -2356,6 +2391,14 @@ u_char* KHttp2::skip_padded(u_char* pos, u_char* end) {
 	return state_skip(pos, end);
 }
 u_char* KHttp2::state_skip_headers(u_char* pos, u_char* end) {
+	/* HPACK must still be decoded so the dynamic table stays in sync. */
+	if (state.pool == NULL) {
+		state.pool = kgl_create_pool(KGL_REQUEST_POOL_SIZE);
+		if (state.pool == NULL) {
+			return this->close(true, KGL_HTTP_V2_INTERNAL_ERROR);
+		}
+		state.keep_pool = 0;
+	}
 	return state_header_block(pos, end);
 }
 u_char* KHttp2::state_field_len(u_char* pos, u_char* end) {
@@ -2396,18 +2439,18 @@ u_char* KHttp2::state_field_len(u_char* pos, u_char* end) {
 
 	klog(KLOG_DEBUG, "http2 hpack %s string length: %i\n", huff ? "encoded" : "raw", len);
 	state.field_rest = (uint32_t)len;
-	if ((int)len > 4096) {
-		klog(KLOG_WARNING, "client exceeded http2_max_field_size limit len=[%d]\n", len);
+	if (state.skip_field || (int)len > 4096 || state.pool == NULL) {
+		if ((int)len > 4096) {
+			klog(KLOG_WARNING, "client exceeded http2_max_field_size limit len=[%d]\n", len);
+		}
+		if (state.index && !state.skip_field) {
+			/* skipping an indexed literal would desync HPACK */
+			return this->close(true, KGL_HTTP_V2_ENHANCE_YOUR_CALM);
+		}
+		state.skip_field = 1;
+		state.index = 0;
 		return state_field_skip(pos, end);
 	}
-	if (state.stream == NULL || state.stream->destroy_by_http2) {
-		return state_field_skip(pos, end);
-	}
-	/*
-	if (state.stream == NULL && !state.index) {
-		return state_field_skip(pos, end);
-	}
-	*/
 
 	alloc = (huff ? len * 8 / 5 : len) + 1;
 
@@ -2417,6 +2460,7 @@ u_char* KHttp2::state_field_len(u_char* pos, u_char* end) {
 	}
 
 	state.field_end = state.field_start;
+	state.field_state = 0;
 
 	if (huff) {
 		return state_field_huff(pos, end);
@@ -2511,7 +2555,15 @@ u_char* KHttp2::state_field_skip(u_char* pos, u_char* end) {
 	pos += size;
 
 	if (state.field_rest == 0) {
-		return state_process_header(pos, end);
+		if (state.parse_name) {
+			state.parse_name = 0;
+			state.parse_value = 1;
+			return state_field_len(pos, end);
+		}
+		state.parse_value = 0;
+		state.skip_field = 0;
+		state.index = 0;
+		return state_header_complete(pos, end);
 	}
 
 	if (state.length) {

@@ -140,7 +140,10 @@ public:
 		kassert(buffer.buf_size > 0);
 		kassert(data.left_read >= 0 || dechunk != NULL);
 
-		if (data.left_read != 0 && !KBIT_TEST(data.flags, RQ_HAVE_EXPECT)) {
+		if (data.left_read != 0) {
+			if (KBIT_TEST(data.flags, RQ_HAVE_EXPECT)) {
+				return false;
+			}
 			//still have data to read
 			if (!skip_post()) {
 				return false;

@@ -108,7 +108,7 @@ public:
 	}
 	bool response_status(uint16_t status_code) {
 		if (data.status_code > 0) {
-			//status_codeÖ»ÄÜ·¢ËÍÒ»´Î
+			//status_codeåªèƒ½å‘é€ä¸€æ¬¡
 			return false;
 		}
 		set_state(STATE_SEND);
@@ -365,12 +365,14 @@ public:
 				if (!data.parse_connect_url((u_char*)val, url_len)) {
 					return false;
 				}
+				break;
 			case METH_PRI:
 				return true;
 			default:
 				if (!parse_url(val, url_len, &data.raw_url)) {
 					return false;
 				}
+				break;
 			}
 			if (!data.parse_http_version(version, (size_t)(val_end - version))) {
 				//klog(KLOG_DEBUG, "httpparse:cann't parse http version [%s]\n", space);
@@ -512,8 +514,13 @@ public:
 					u_char* hot = (u_char*)val + 6;
 					kgl_request_range* range = alloc_request_range();
 					if (*hot == '-') {
-						/* last range model */
-						range->from = -kgl_atol(hot + 1, end - hot - 1);
+						/* last range model: bytes=-N. suffix 0 / empty is invalid (RFC 7233). */
+						int64_t suffix = kgl_atol(hot + 1, end - hot - 1);
+						if (suffix <= 0 || hot + 1 >= end) {
+							range->from = INT64_MAX;
+							return true;
+						}
+						range->from = -suffix;
 						return true;
 					}
 					range->from = kgl_atol(hot, end - hot);

@@ -248,8 +248,8 @@ public:
 		while (got>0) {
 			bool header_is_empty;
 			if (header->sendfile) {
-				header->file->st.offset += got;
 				int this_len = KGL_MIN(got, header->used);
+				header->file->st.offset += this_len;
 				header->used -= this_len;
 				got -= this_len;
 				header_is_empty = (header->used == 0);

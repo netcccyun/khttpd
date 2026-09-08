@@ -144,6 +144,8 @@ bool kgl_http_v2_huff_decode(u_char* state, u_char* src, size_t len, u_char** ds
 #define KGL_HTTP_V2_FRAME_BUFFER_SIZE            24
 /* outstanding control frames queued in write_buffer (PING/SETTINGS/RST/...) */
 #define KGL_HTTP_V2_MAX_FRAMES                   256
+#define KGL_HTTP_V2_MAX_CONTINUATIONS            128
+#define KGL_HTTP_V2_MAX_IDLE_FRAMES              1024
 
 #define KGL_HTTP_V2_DEFAULT_FRAME_SIZE           (1 << 14)
 #define KGL_HTTP_V2_TABLE_SIZE                   4096
@@ -237,6 +239,7 @@ struct kgl_http_v2_state_t
 	uint8_t                         parse_value : 1;
 	uint8_t                         index : 1;
 	uint8_t							keep_pool : 1;
+	uint8_t                         skip_field : 1;
 	uint8_t                         field_state;
 	uint32_t                        field_rest;
 	u_char* field_start;
@@ -244,6 +247,7 @@ struct kgl_http_v2_state_t
 	kgl_pool_t* pool;
 	kgl_http_v2_header_t             header;
 	uint32_t                         header_length;
+	uint16_t                         continuation_frames;
 	uint32_t                         buffer_used;
 	u_char                           buffer[8192];
 	kgl_http_v2_handler_pt           handler;
@@ -348,7 +352,7 @@ public:
 			new_buf->skip_data_free = 1;
 			new_buf->sendfile = 1;
 			new_buf->file = e->file;
-			total_len = (uint16_t)KGL_MIN(len, e->buf_len);
+			total_len = KGL_MIN(len, e->buf_len);
 			new_buf->used = total_len;
 			buf_out = last = new_buf;
 		} else {
@@ -601,6 +605,7 @@ private:
 	uint32_t init_window;
 	uint32_t frame_size;
 	uint32_t max_stream;
+	uint16_t idle_frames;
 	uint16_t enable_connect : 1;
 	uint16_t write_processing : 1;
 	uint16_t read_processing : 1;
