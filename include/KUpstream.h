@@ -130,7 +130,7 @@ public:
 	union
 	{
 		time_t expire_time;
-		//¼ÇÂ¼¿ªÊ¼¶ÁµÄÊ±¼ä£¬ÓÃÓÚ³¤Á¬½Ó¼ÆËã³¬Ê±ÓÃµÄ¡£
+		//è®°å½•å¼€å§‹è¯»çš„æ—¶é—´ï¼Œç”¨äºŽé•¿è¿žæŽ¥è®¡ç®—è¶…æ—¶ç”¨çš„ã€‚
 		time_t read_header_time;
 	};
 	KPoolableSocketContainer* container;

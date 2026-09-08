@@ -162,7 +162,7 @@ public:
 	}
 	KString& operator = (const KString& a) {
 		if (this == &a) {
-			//�Ը�ֵ
+			//自赋值
 			return *this;
 		}
 		kstring_release(s);

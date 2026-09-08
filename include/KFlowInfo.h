@@ -5,15 +5,15 @@
 #include "KMutex.h"
 #include "kselector.h"
 /**
-* Á÷Á¿Í³¼ÆÀà
+* æµé‡ç»Ÿè®¡ç±»
 */
 class KFlowData {
 public:
-	//×ÜÁ÷Á¿
+	//æ€»æµé‡
 	INT64 flow;
-	//»º´æµÄÁ÷Á¿
+	//ç¼“å­˜çš„æµé‡
 	INT64 cache;
-	//postÉÏĞĞÁ÷Á¿
+	//postä¸Šè¡Œæµé‡
 	volatile int64_t post;
 	INT64 last_flow;
 	INT64 last_time;

@@ -2,9 +2,9 @@
 #define KCONDWAIT_H
 #include "kforwin32.h"
 /**
-Ìõ¼ş±äÁ¿
-autoreset = true,×Ô¶¯ÖØÖÃ±äÁ¿£¬ÊÊÓ¦Í¬Ê±Ò»¸öµÈ´ı£¬¶à´ÎÊ¹ÓÃµÄ³¡¾°
-autoreset = false,²»×Ô¶¯ÖØÖÃ±äÁ¿£¬ÊÊÓ¦¶à¸öÍ¬Ê±µÈ´ı£¬Ò»´ÎÊ¹ÓÃµÄ³¡¾°
+æ¡ä»¶å˜é‡
+autoreset = true,è‡ªåŠ¨é‡ç½®å˜é‡ï¼Œé€‚åº”åŒæ—¶ä¸€ä¸ªç­‰å¾…ï¼Œå¤šæ¬¡ä½¿ç”¨çš„åœºæ™¯
+autoreset = false,ä¸è‡ªåŠ¨é‡ç½®å˜é‡ï¼Œé€‚åº”å¤šä¸ªåŒæ—¶ç­‰å¾…ï¼Œä¸€æ¬¡ä½¿ç”¨çš„åœºæ™¯
 */
 #ifdef _WIN32
 class KCondWait
@@ -61,7 +61,7 @@ public:
 		}
 		struct timeval now;
 
-		  /* »ñÈ¡µ±Ç°Ê±¼ä */
+		  /* è·å–å½“å‰æ—¶é—´ */
 		gettimeofday(&now,NULL);
 		timespec ts;
 		ts.tv_sec = now.tv_sec + msec/1000;

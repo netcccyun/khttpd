@@ -115,8 +115,8 @@ public:
 	int avg_monitor_tick = 0;
 	int error_try_time;
 	/*
-	 * Á¬Ðø´íÎóÁ¬½Ó´ÎÊý£¬Èç¹û³¬¹ýMAX_ERROR_COUNT´Î£¬¾Í»áÈÏÎªÊÇÎÊÌâµÄ¡£
-	 * ÏÂ´ÎÊÔÁ¬½ÓÊ±¼ä»á´Óµ±Ç°Ê±¼ä¼ÓERROR_RECONNECT_TIMEÃë¡£
+	 * è¿žç»­é”™è¯¯è¿žæŽ¥æ¬¡æ•°ï¼Œå¦‚æžœè¶…è¿‡MAX_ERROR_COUNTæ¬¡ï¼Œå°±ä¼šè®¤ä¸ºæ˜¯é—®é¢˜çš„ã€‚
+	 * ä¸‹æ¬¡è¯•è¿žæŽ¥æ—¶é—´ä¼šä»Žå½“å‰æ—¶é—´åŠ ERROR_RECONNECT_TIMEç§’ã€‚
 	 */
 	volatile uint16_t error_count;
 	uint16_t max_error_count;

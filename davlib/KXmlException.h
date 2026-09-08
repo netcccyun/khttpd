@@ -20,7 +20,7 @@
 #include<exception>
 #include<string>
  /*
-  * xml½âÎöÒì³£Àà
+  * xmlè§£æå¼‚å¸¸ç±»
   */
 class KXmlException : public std::exception
 {

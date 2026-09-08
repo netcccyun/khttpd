@@ -42,7 +42,7 @@ restart:
 		}
 		(*buf) = next_line + 1;
 		chunk_size = KHTTPD_CHUNK_STATUS_READ_SIZE;
-		//这里不加break直接fallthrough,到下面status_read_chunk_size
+		//杩欓噷涓嶅姞break鐩存帴fallthrough,鍒颁笅闈tatus_read_chunk_size
 	}
 	default:
 		assert(KBIT_TEST(chunk_size, KHTTPD_CHUNK_STATUS) != KHTTPD_CHUNK_STATUS);

@@ -170,7 +170,7 @@ static int webdav_main(void* arg, int argc)
 	test_get_range(&provider);
 	KFixString in(kgl_expand_string("ss"));
 	test_assert(KGL_OK == provider.put(DAV_PREFIX_DIR "/test.txt", &in));
-	//ÔÙ´Î¸²¸Ç
+	//å†æ¬¡è¦†ç›–
 	KFixString in2(kgl_expand_string("test"));
 	test_assert(KGL_OK == provider.put(DAV_PREFIX_DIR "/test.txt", &in2));
 	assert_dav_file_content(&provider, DAV_PREFIX_DIR "/test.txt", kgl_expand_string("test"));
@@ -192,7 +192,7 @@ static int webdav_main(void* arg, int argc)
 	test_assert(KGL_EEXSIT == provider.copy(DAV_PREFIX_DIR "/test2.txt", DAV_PREFIX_DIR "/test_copyed.txt"));
 	test_assert(KGL_OK == provider._delete(DAV_PREFIX_DIR "/dir2/"));
 	test_assert(KGL_OK == provider._delete(DAV_PREFIX_DIR "/test2.txt"));
-	//ÔÙ´Î¼ì²â£¬¿´¿´ÄÜ·ñ³É¹¦É¾³ı¡£
+	//å†æ¬¡æ£€æµ‹ï¼Œçœ‹çœ‹èƒ½å¦æˆåŠŸåˆ é™¤ã€‚
 	file_list.clean();
 	test_assert(KGL_OK == provider.list(DAV_PREFIX_DIR "/", file_list));
 	test_assert(file_list.find("dir") == nullptr);

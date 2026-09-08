@@ -28,7 +28,7 @@ bool KHttp2Upstream::parse_header(const char* attr, int attr_len, const char* va
 skip_trailer:
 	kgl_http2_event* re = ctx->read_wait;
 	if (re) {
-		//client模式中在等待读header的过程中，有可能就会被客户端connection broken而导致shutdown.
+		//client妯″紡涓湪绛夊緟璇籬eader鐨勮繃绋嬩腑锛屾湁鍙兘灏变細琚鎴风connection broken鑰屽鑷磗hutdown.
 		kassert(re->header);
 		return re->header(this, re->header_arg, attr, attr_len, val, val_len, false);
 	}

@@ -39,7 +39,7 @@ char* getString(char* str, char** nextstr, const char* ended_chars,
 	char endChar = *str;
 	char* start;
 	if (endChar != '\'' && endChar != '"') {
-		//Ã»ÓĞÒıºÅÒıÆğÀ´µÄ×Ö·û´®
+		//æ²¡æœ‰å¼•å·å¼•èµ·æ¥çš„å­—ç¬¦ä¸²
 		start = str;
 		while (*str && !isspace((unsigned char)*str)) {
 			if (ended_chars && strchr(ended_chars, *str) != NULL) {

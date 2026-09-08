@@ -95,8 +95,8 @@ class KXml
 public:
 	/**
 	* @deprecated
-	* encode,decode,paramÕâÈı¸öº¯Êı¹ıÊ±¡£
-	* ÇëÓÃĞ§ÂÊ¸ü¸ßµÄhtmlEncodeºÍhtmlDecode
+	* encode,decode,paramè¿™ä¸‰ä¸ªå‡½æ•°è¿‡æ—¶ã€‚
+	* è¯·ç”¨æ•ˆç‡æ›´é«˜çš„htmlEncodeå’ŒhtmlDecode
 	*/
 	static KString encode(const KString &str);
 	//@deprecated
@@ -107,16 +107,16 @@ public:
 	static char* htmlEncode(const char* str, int& len, char* buf);
 	static char* htmlDecode(char* str, int& len);
 	/*
-	 * ÉèÖÃÊÂ¼ş¼àÌıÆ÷
+	 * è®¾ç½®äº‹ä»¶ç›‘å¬å™¨
 	 */
 	void setEvent(KXmlEvent* event);
 	void addEvent(KXmlEvent* event);
 	/*
-	 * ¿ªÊ¼½âÎöÎÄ¼ş
+	 * å¼€å§‹è§£ææ–‡ä»¶
 	 */
 	bool parseFile(KString file);
 	/*
-	 * ¿ªÊ¼½âÎöÒ»¸ö×Ö·û´®
+	 * å¼€å§‹è§£æä¸€ä¸ªå­—ç¬¦ä¸²
 	 */
 	bool parseString(const char* buf);
 	KXml();
@@ -135,21 +135,21 @@ public:
 	static constexpr int max_file_size = 1048576;
 private:
 	/*
-	 * ´ÓÒ»¸öÎÄ¼şÖĞ¶Áµ½×Ö·û´®
+	 * ä»ä¸€ä¸ªæ–‡ä»¶ä¸­è¯»åˆ°å­—ç¬¦ä¸²
 	 */
 	int getLine();
 	char* getContent(const KString& file);
 	/*
-	 * µÃµ½±êÇ©ÉÏÏÂÎÄ
+	 * å¾—åˆ°æ ‡ç­¾ä¸Šä¸‹æ–‡
 	 */
 	 //	void getContext(KString &context);
 	KXmlContext* newContext(const char* qName);
 	/*
-	 * ±êÇ©ÉÏÏÂÎÄ
+	 * æ ‡ç­¾ä¸Šä¸‹æ–‡
 	 */
 	std::list<KXmlContext*> contexts;
 	/*
-	 * ±£´æµÄÊÂ¼ş¼àÌıÆ÷
+	 * ä¿å­˜çš„äº‹ä»¶ç›‘å¬å™¨
 	 */
 	 //KXmlEvent *event;
 	std::list<KXmlEvent*> events;

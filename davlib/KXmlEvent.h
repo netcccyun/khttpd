@@ -23,7 +23,7 @@
 #define CDATA_START	"<![CDATA["
 #define CDATA_END	"]]>"
 /*
- * xml½âÎöÊÂ¼ş½ÓÌıÆ÷
+ * xmlè§£æäº‹ä»¶æ¥å¬å™¨
  */
 class KXmlEvent {
 public:
@@ -35,26 +35,26 @@ public:
 	}
 
 	/*
-	 * ¿ªÊ¼Ò»¸ö±êÇ©
-	 * context ±êÇ©ÉÏÏÂÎÄ
-	 * attribute ±êÇ©ÊôĞÔ
+	 * å¼€å§‹ä¸€ä¸ªæ ‡ç­¾
+	 * context æ ‡ç­¾ä¸Šä¸‹æ–‡
+	 * attribute æ ‡ç­¾å±æ€§
 	 */
 	virtual bool startElement(KXmlContext* context) {
 		return false;
 	}
 	/*
-	 * ¿ªÊ¼Ò»¸ö±êÇ©ÎÄ±¾
-	 * context ±êÇ©ÉÏÏÂÎÄ
-	 * character ÎÄ±¾
-	 * len ÎÄ±¾³¤¶È
+	 * å¼€å§‹ä¸€ä¸ªæ ‡ç­¾æ–‡æœ¬
+	 * context æ ‡ç­¾ä¸Šä¸‹æ–‡
+	 * character æ–‡æœ¬
+	 * len æ–‡æœ¬é•¿åº¦
 	 */
 	virtual bool startCharacter(KXmlContext *context, char *character, int len) {
 		return false;
 	}
 
 	/*
-	 * ½áÊøÒ»¸ö±êÇ©
-	 * context ±êÇ©ÉÏÏÂÎÄ
+	 * ç»“æŸä¸€ä¸ªæ ‡ç­¾
+	 * context æ ‡ç­¾ä¸Šä¸‹æ–‡
 	 */
 	virtual bool endElement(KXmlContext *context) {
 		return false;

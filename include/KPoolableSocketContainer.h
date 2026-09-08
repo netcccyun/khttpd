@@ -14,7 +14,7 @@
 #include "KAtomCountable.h"
 void SafeDestroyUpstream(KUpstream *st);
 /*
- * Á¬½Ó³ØÈÝÆ÷Àà
+ * è¿žæŽ¥æ± å®¹å™¨ç±»
  */
 class KPoolableSocketContainerImp {
 public:
@@ -36,9 +36,9 @@ public:
 	virtual ~KPoolableSocketContainer();
 
 	/*
-	»ØÊÕÁ¬½Ó
-	close,ÊÇ·ñ¹Ø±Õ
-	lifeTime Á¬½ÓÊ±¼ä
+	å›žæ”¶è¿žæŽ¥
+	close,æ˜¯å¦å…³é—­
+	lifeTime è¿žæŽ¥æ—¶é—´
 	*/
 	virtual void gcSocket(KUpstream *st,int life_time);
 	void bind(KUpstream *st);
@@ -47,19 +47,19 @@ public:
 		return life_time;
 	}
 	/*
-	 * ÉèÖÃÁ¬½Ó³¬Ê±Ê±¼ä
+	 * è®¾ç½®è¿žæŽ¥è¶…æ—¶æ—¶é—´
 	 */
 	void setLifeTime(int life_time);
 	/*
-	 * ¶¨ÆÚË¢ÐÂÉ¾³ý¹ýÆÚÁ¬½Ó
+	 * å®šæœŸåˆ·æ–°åˆ é™¤è¿‡æœŸè¿žæŽ¥
 	 */
 	virtual void refresh(time_t nowTime);
 	/*
-	 * Çå³ýËùÓÐÁ¬½Ó
+	 * æ¸…é™¤æ‰€æœ‰è¿žæŽ¥
 	 */
 	void clean();
 	/*
-	 * µÃµ½Á¬½ÓÊý
+	 * å¾—åˆ°è¿žæŽ¥æ•°
 	 */
 	 unsigned getSize() {
 		unsigned size = 0;
@@ -110,7 +110,7 @@ protected:
 	KUpstream* new_upstream(kconnection* cn);
 	KUpstream* get_pool_socket(uint32_t flags);
 	/*
-	 * °ÑÁ¬½ÓÕæÕý·ÅÈë³ØÖÐ
+	 * æŠŠè¿žæŽ¥çœŸæ­£æ”¾å…¥æ± ä¸­
 	 */
 	void PutPoolSocket(KUpstream *st);
 
@@ -123,7 +123,7 @@ private:
 	{
 		int life_time = this->life_time;
 		if (life_time <= 10) {
-			//http2×îÉÙ10ÃëÁ¬½ÓÊ±¼ä
+			//http2æœ€å°‘10ç§’è¿žæŽ¥æ—¶é—´
 			life_time = 10;
 		}
 		return kgl_current_sec + life_time;

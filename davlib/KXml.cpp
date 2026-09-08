@@ -342,7 +342,7 @@ bool KXml::internelParseString(char* buf) {
 				hot += 9;
 				state = START_CHAR;
 			} else if (strncmp(hot, "<!--", 4) == 0) {
-				//×¢ÊÍ
+				//æ³¨é‡Š
 				hot = strstr(hot + 4, "-->");
 				if (hot == NULL) {
 					throw KXmlException("cann't get comment end");
@@ -468,7 +468,7 @@ bool KXml::internelParseString(char* buf) {
 			*p = 0;
 			if (contexts.size() <= 0) {
 				throw KXmlException("contexts not enoungh");
-				//				printf("contexts ²»¹»\n");
+				//				printf("contexts ä¸å¤Ÿ\n");
 				//				return false;
 			}
 			auto it2 = contexts.end();

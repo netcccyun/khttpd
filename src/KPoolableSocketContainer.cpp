@@ -208,8 +208,8 @@ KUpstream *KPoolableSocketContainer::get_pool_socket(uint32_t flags) {
 	socket->read_header_time = kgl_current_sec;
 	kselector *selector = socket->get_connection()->st.base.selector;
 	if (selector!=NULL && selector!=kgl_get_tls_selector()) {
-		//Á¬½ÓºÍµ±Ç°selector²»Ò»ÖÂ,Ò»°ã·¢ÉúÔÚwindowsÉÏ£¬¶àÏß³ÌÇé¿öÉÏ.
-		//ÒòÎªwindowsÖÐsocketÒ»µ«°ó¶¨ÁËiocp£¬ÎÞ·¨½â°ó¡£
+		//è¿žæŽ¥å’Œå½“å‰selectorä¸ä¸€è‡´,ä¸€èˆ¬å‘ç”Ÿåœ¨windowsä¸Šï¼Œå¤šçº¿ç¨‹æƒ…å†µä¸Š.
+		//å› ä¸ºwindowsä¸­socketä¸€ä½†ç»‘å®šäº†iocpï¼Œæ— æ³•è§£ç»‘ã€‚
 		return new KTsUpstream(socket);
 	}
 	socket->bind_selector(kgl_get_tls_selector());

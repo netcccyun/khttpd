@@ -53,7 +53,7 @@ public:
 	virtual bool response_headers(const KHttpHeader* header) override {
 		return khttpd::response_headers<KHttp2Sink>(this, header);
 	}
-	//·µ»ØÍ·³¤¶È,-1±íÊ¾³ö´í
+	//è¿”å›å¤´é•¿åº¦,-1è¡¨ç¤ºå‡ºé”™
 	int internal_start_response_body(int64_t body_size, bool is_100_continue) override {
 		if (is_100_continue) {
 			return http2->send_header(ctx, false);
