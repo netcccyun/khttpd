@@ -371,7 +371,24 @@ bool KXml::internelParseString(char* buf) {
 			single = false;
 			while (*hot && isspace((unsigned char)*hot))
 				hot++;
-			p = strchr(hot, '>');
+			char quote = 0;
+			p = hot;
+			for (; *p; ++p) {
+				if (quote) {
+					if (*p == quote) {
+						quote = 0;
+					}
+					continue;
+				}
+				if (*p == '\'' || *p == '"') {
+					quote = *p;
+				} else if (*p == '>') {
+					break;
+				}
+			}
+			if (!*p) {
+				p = NULL;
+			}
 			if (!p) {
 				throw KXmlException("cann't get element end");
 			}

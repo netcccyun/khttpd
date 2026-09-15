@@ -190,6 +190,34 @@ namespace khttpd {
 			add(it->value()->add_ref(), last_pos);
 		}
 	}
+	static void write_xml_attribute(KWStream* out, const KString& value) {
+		out->write_all(_KS("\""));
+		for (size_t i = 0; i < value.size(); ++i) {
+			switch (value[i]) {
+			case '&':
+				out->write_all(_KS("&amp;"));
+				break;
+			case '<':
+				out->write_all(_KS("&lt;"));
+				break;
+			case '>':
+				out->write_all(_KS("&gt;"));
+				break;
+			case '"':
+				out->write_all(_KS("&quot;"));
+				break;
+			default:
+				if ((unsigned char)value[i] < 0x20 && value[i] != '\t' && value[i] != '\r' && value[i] != '\n') {
+					out->write_all(_KS("&#xfffd;"));
+				} else {
+					out->write_all(value.c_str() + i, 1);
+				}
+				break;
+			}
+		}
+		out->write_all(_KS("\""));
+	}
+
 	KGL_RESULT KXmlNodeBody::write(KWStream* out, int level) const {
 		//write attribute
 		const KString* text = nullptr;
@@ -206,18 +234,7 @@ namespace khttpd {
 			out->write_all((*it).first.c_str(), (int)(*it).first.size());
 			out->write_all(_KS("="));
 
-			if ((*it).second.find('\'') == std::string::npos) {
-				out->write_all(_KS("'"));
-				out->write_all((*it).second.c_str(), (int)(*it).second.size());
-				out->write_all(_KS("'"));
-			} else if ((*it).second.find('"') == std::string::npos) {
-				out->write_all(_KS("\""));
-				out->write_all((*it).second.c_str(), (int)(*it).second.size());
-				out->write_all(_KS("\""));
-			} else {
-				//klog(KLOG_ERR, "cann't write xml attribute [%s] value also has ['\"]\n", (*it).first.c_str());
-				out->write_all(_KS("''"));
-			}
+			write_xml_attribute(out, (*it).second);
 		}
 
 		//write child
