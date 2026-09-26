@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <list>
 #include <stack>
+#include <vector>
 #include "KXmlEvent.h"
 #include "KAtomCountable.h"
 #include "KMap.h"
@@ -76,6 +77,11 @@ namespace khttpd {
 	class KXmlNodeBody
 	{
 	public:
+		struct KXmlChildOrder
+		{
+			KXmlNode* node;
+			KXmlNodeBody* body;
+		};
 		KXmlNodeBody() {}
 		KXmlNodeBody(const KXmlNodeBody& a) = delete;
 		~KXmlNodeBody();
@@ -128,12 +134,16 @@ namespace khttpd {
 		void copy_child_from(const KXmlNodeBody* node);
 		KMapNode<KXmlNode>* find_any_child(const KXmlKeyTag* tag) const;
 		KXmlNode* find_child(const KString& tag) const;
-		void clear() {
-			childs.clear();
-			attributes.clear();
-		}
+		void clear();
+		bool remove_child(const KXmlKey* key);
 		bool update(KXmlKey* key, uint32_t index, KXmlNode* xml, bool copy_childs = true, bool create_flag = false);
 		KMap<KXmlKey, KXmlNode> childs;
+		/*
+		 * `childs` is an ordered lookup index, not document order.  Keep a
+		 * separate occurrence list so a read/modify/write cycle does not group
+		 * or reorder elements with different keys.
+		 */
+		std::vector<KXmlChildOrder> child_order;
 		KXmlAttribute attributes;
 		KXmlNodeBody* add(KXmlNode* xml, uint32_t index);
 		friend class KXmlNode;
@@ -229,21 +239,7 @@ namespace khttpd {
 				if (!body) {
 					break;
 				}
-				for (int i = 0; i < level; i++) {
-					out->write_all(_KS("\t"));
-				}
-				out->write_all(_KS("<"));
-				out->write_all(key.tag->data, key.tag->len);
-				auto result = body->write(out, level);
-				if (result == KGL_END) {
-					continue;
-				}
-				if (result != KGL_OK) {
-					return result;
-				}
-				out->write_all(_KS("</"));
-				out->write_all(key.tag->data, key.tag->len);
-				result = out->write_all(_KS(">\n"));
+				auto result = write_body(out, level, body);
 				if (result != KGL_OK) {
 					return result;
 				}
@@ -326,6 +322,23 @@ namespace khttpd {
 		khttpd::KAutoArray<KXmlNodeBody> body;
 		friend class KXmlNodeBody;
 	private:
+		KGL_RESULT write_body(KWStream* out, int level, const KXmlNodeBody* body) const {
+			for (int i = 0; i < level; i++) {
+				out->write_all(_KS("\t"));
+			}
+			out->write_all(_KS("<"));
+			out->write_all(key.tag->data, key.tag->len);
+			auto result = body->write(out, level);
+			if (result == KGL_END) {
+				return KGL_OK;
+			}
+			if (result != KGL_OK) {
+				return result;
+			}
+			out->write_all(_KS("</"));
+			out->write_all(key.tag->data, key.tag->len);
+			return out->write_all(_KS(">\n"));
+		}
 		~KXmlNode() {}
 	};
 

@@ -117,11 +117,32 @@ namespace khttpd {
 		return true;
 	}
 	KXmlNodeBody::~KXmlNodeBody() {
+		clear();
+	}
+	void KXmlNodeBody::clear() {
 		childs.iterator([](void* data, void* arg) {
-			KXmlNode* node = (KXmlNode*)data;
 			((KXmlNode*)data)->release();
 			return iterator_remove_continue;
 			}, NULL);
+		child_order.clear();
+		attributes.clear();
+	}
+	bool KXmlNodeBody::remove_child(const KXmlKey* key) {
+		auto it = childs.find(key);
+		if (!it) {
+			return false;
+		}
+		auto node = it->value();
+		for (auto order = child_order.begin(); order != child_order.end();) {
+			if (order->node == node) {
+				order = child_order.erase(order);
+			} else {
+				++order;
+			}
+		}
+		childs.erase(it);
+		node->release();
+		return true;
 	}
 	bool KXmlNodeBody::update(KXmlKey* key, uint32_t index, KXmlNode* xml, bool copy_childs, bool create_flag) {
 		KMapNode<KXmlNode>* it;
@@ -133,6 +154,13 @@ namespace khttpd {
 			it = childs.insert(key, &new_flag);
 			if (new_flag) {
 				it->value(xml->add_ref());
+				for (uint32_t body_index = 0;; ++body_index) {
+					auto body = xml->get_body(body_index);
+					if (!body) {
+						break;
+					}
+					child_order.push_back({ xml, body });
+				}
 				return true;
 			}
 		} else {
@@ -146,6 +174,12 @@ namespace khttpd {
 			//remove
 			auto body = node->remove_body(index);
 			if (body) {
+				for (auto order = child_order.begin(); order != child_order.end(); ++order) {
+					if (order->body == body) {
+						child_order.erase(order);
+						break;
+					}
+				}
 				delete body;
 				if (node->get_body_count() == 0) {
 					childs.erase(it);
@@ -166,6 +200,12 @@ namespace khttpd {
 		if (copy_childs) {
 			xml_body->copy_child_from(*body);
 		}
+		for (auto& order : child_order) {
+			if (order.body == *body) {
+				order.body = xml_body;
+				break;
+			}
+		}
 		delete (*body);
 		*body = xml_body;
 		return true;
@@ -175,6 +215,13 @@ namespace khttpd {
 		auto it = childs.insert(&xml->key, &new_flag);
 		if (new_flag) {
 			it->value(xml->add_ref());
+			for (uint32_t body_index = 0;; ++body_index) {
+				auto body = xml->get_body(body_index);
+				if (!body) {
+					break;
+				}
+				child_order.push_back({ xml, body });
+			}
 			return xml->get_first();
 		}
 		auto old_node = it->value();
@@ -183,11 +230,33 @@ namespace khttpd {
 			return NULL;
 		}
 		old_node->insert_body(body, index);
+		if (index == last_pos) {
+			/* append() means document order, not "after the same tag" */
+			child_order.push_back({ old_node, body });
+			return body;
+		}
+		auto position = child_order.end();
+		uint32_t current_index = 0;
+		for (auto order = child_order.begin(); order != child_order.end(); ++order) {
+			if (order->node != old_node) {
+				continue;
+			}
+			if (current_index == index) {
+				position = order;
+				break;
+			}
+			++current_index;
+			position = order + 1;
+		}
+		child_order.insert(position, { old_node, body });
 		return body;
 	}
 	void KXmlNodeBody::copy_child_from(const KXmlNodeBody* node) {
-		for (auto it = node->childs.first(); it; it = it->next()) {
-			add(it->value()->add_ref(), last_pos);
+		for (const auto& order : node->child_order) {
+			auto child = KSafeXmlNode(new KXmlNode(&order.node->key));
+			delete child->remove_last();
+			child->insert_body(order.body->clone(), last_pos);
+			add(child.get(), last_pos);
 		}
 	}
 	static void write_xml_attribute(KWStream* out, const KString& value) {
@@ -238,7 +307,7 @@ namespace khttpd {
 		}
 
 		//write child
-		if (!childs.empty()) {
+		if (!child_order.empty()) {
 			out->write_all(_KS(">\n"));
 		} else if (text == nullptr) {
 			out->write_all(_KS("/>\n"));
@@ -246,8 +315,8 @@ namespace khttpd {
 		} else {
 			out->write_all(_KS(">"));
 		}
-		for (auto node : childs) {
-			auto result = node->write(out, level + 1);
+		for (const auto& order : child_order) {
+			auto result = order.node->write_body(out, level + 1, order.body);
 			if (result != KGL_OK) {
 				return result;
 			}
@@ -260,11 +329,11 @@ namespace khttpd {
 			} else {
 				out->write_all(text->c_str(), (int)text->size());
 			}
-			if (!childs.empty()) {
+			if (!child_order.empty()) {
 				out->write_all(_KS("\n"));
 			}
 		}
-		if (!childs.empty()) {
+		if (!child_order.empty()) {
 			for (int i = 0; i < level; i++) {
 				out->write_all(_KS("\t"));
 			}
@@ -273,8 +342,11 @@ namespace khttpd {
 	}
 	void KXmlNodeBody::clone_to(KXmlNodeBody* body) const {
 		body->attributes = attributes;
-		for (auto child : childs) {
-			body->add(child->clone().get(), last_pos);
+		for (const auto& order : child_order) {
+			auto child = KSafeXmlNode(new KXmlNode(&order.node->key));
+			delete child->remove_last();
+			child->insert_body(order.body->clone(), last_pos);
+			body->add(child.get(), last_pos);
 		}
 	}
 	KXmlNodeBody* KXmlNodeBody::clone() const {
