@@ -72,14 +72,16 @@ KGL_RESULT KHttpUpstream::read_header()
 		ctx.read_buffer = ks_buffer_new(8192);
 	}
 	int64_t begin_time_msec = kgl_current_msec;
+	bool received_data = false;
 	for (;;) {
 	continue_read:
 		int write_len;
 		char* write_buf = ks_get_write_buffer(ctx.read_buffer, &write_len);
 		int got = kfiber_net_read(cn, write_buf, write_len);
 		if (got <= 0) {
-			return KGL_EDATA_FORMAT;
+			return received_data ? KGL_EDATA_FORMAT : KGL_ESOCKET_BROKEN;
 		}
+		received_data = true;
 		ks_write_success(ctx.read_buffer, got);
 		khttp_parse_result rs;
 		char* hot = ctx.read_buffer->buf;

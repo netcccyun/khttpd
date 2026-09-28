@@ -62,7 +62,7 @@ class KUpstream;
 #define KGL_HTTP_V2_PADDED_FLAG          0x08
 #define KGL_HTTP_V2_PRIORITY_FLAG        0x20
 
-#define KGL_HTTP_V2_DEFAULT_MAX_STREAM   64
+#define KGL_HTTP_V2_DEFAULT_MAX_STREAM   128
 #define kgl_http_v2_parse_uint16(p)  ntohs(*(uint16_t *) (p))
 #define kgl_http_v2_parse_uint32(p)  ntohl(*(uint32_t *) (p))
 #define kgl_http_v2_prefix(bits)  ((1 << (bits)) - 1)
