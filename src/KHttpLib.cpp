@@ -353,7 +353,11 @@ char* make_http_time(time_t time, char* buf, int size) {
 		tm.tm_sec);
 }
 const char* mk1123time(time_t time, char* buf, int size) {
-	make_http_time(time, buf, size);
+	if (size <= 0) {
+		return buf;
+	}
+	char* end = make_http_time(time, buf, size - 1);
+	*end = '\0';
 	return buf;
 }
 #define	BU_FREE	1

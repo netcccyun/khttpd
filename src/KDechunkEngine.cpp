@@ -37,7 +37,7 @@ restart:
 			while (trailer_end > (*buf) && isspace((unsigned char)*trailer_end)) {
 				trailer_end--;
 			}
-			if (*buf == trailer_end) {
+			if (*buf == next_line) {
 				(*buf) = next_line + 1;
 				chunk_size = KHTTPD_CHUNK_STATUS_IS_END;
 				return KDechunkResult::End;
@@ -65,6 +65,11 @@ restart:
 				}
 				u_char ch = *((u_char*)*buf);
 				if (ch == '\n') {
+					if (chunk_size == KHTTPD_CHUNK_STATUS_READ_SIZE) {
+						//chunk-size must have at least one hex digit.
+						chunk_size = KHTTPD_CHUNK_STATUS_IS_FAILED;
+						return KDechunkResult::Failed;
+					}
 					KBIT_CLR(chunk_size, KHTTPD_CHUNK_STATUS_PREFIX);
 					(*buf)++;
 					if (chunk_size == 0) {
@@ -101,6 +106,10 @@ restart:
 					}
 					chunk_size = new_chunk_size | KHTTPD_CHUNK_PART_SIZE;
 					goto next_buf;
+				}
+				if (chunk_size == KHTTPD_CHUNK_STATUS_READ_SIZE) {
+					chunk_size = KHTTPD_CHUNK_STATUS_IS_FAILED;
+					return KDechunkResult::Failed;
 				}
 				KBIT_SET(chunk_size, KHTTPD_CHUNK_PART_SIZE_END);
 			next_buf:

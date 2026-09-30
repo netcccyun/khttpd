@@ -1888,7 +1888,7 @@ u_char* KHttp2::state_headers(u_char* pos, u_char* end) {
 		node = get_node(state.sid, false);
 		if (node == NULL) {
 			klog(KLOG_WARNING, "http2 cann't find node [%d]\n", state.sid);
-			return state_skip(pos, end);
+			return state_skip_headers(pos, end);
 		}
 		stream = node->stream;
 		kassert(stream);
@@ -1896,7 +1896,7 @@ u_char* KHttp2::state_headers(u_char* pos, u_char* end) {
 		stream->RemoveQueue();
 		if (!stream->is_available() || stream->in_closed) {
 			klog(KLOG_WARNING, "http2 stream in is not available [%d]\n", state.sid);
-			return state_skip(pos, end);
+			return state_skip_headers(pos, end);
 		}
 		//assert(stream->read_wait || stream->read_trailer);
 		assert(stream->us);

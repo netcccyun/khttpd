@@ -29,6 +29,9 @@ static bool ts_header_callback(KUpstream *us, void *arg, const char *attr, int a
 	} else {
 		header = new_pool_http_header(pool, attr, attr_len, val, val_len);
 	}
+	if (header == nullptr) {
+		return false;
+	}
 	if (ts->header) {
 		ts->last_header->next = header;
 		ts->last_header = header;
@@ -102,7 +105,9 @@ KGL_RESULT KTsUpstream::read_header()
 	kfiber_join(fiber, &ret);
 	bool is_first = true;
 	while (header) {
-		stack.header(us, stack.arg, (header->name_is_know?NULL:header->buf), header->name_len, header->buf + header->val_offset, header->val_len, is_first);
+		if (!stack.header(us, stack.arg, (header->name_is_know?NULL:header->buf), header->name_len, header->buf + header->val_offset, header->val_len, is_first)) {
+			return KGL_EDATA_FORMAT;
+		}
 		is_first = false;
 		header = header->next;
 	}

@@ -64,13 +64,15 @@ bool kgl_build_know_header_value(kgl_pool_t* pool, KHttpHeader* header, const ch
 		break;
 	}
 	default:
-		if (val_len <= 0 || val_len > MAX_HEADER_ATTR_VAL_SIZE) {
+		if (val_len < 0 || val_len > MAX_HEADER_ATTR_VAL_SIZE) {
 			//fprintf(stderr, "unknow val_len=[%d]\n", val_len);
 			//assert(false);
 			return false;
 		}
 		header->buf = (char*)(pool ? kgl_pnalloc(pool, val_len + 1) : xmalloc(val_len + 1));
-		kgl_memcpy(header->buf, val, val_len);
+		if (val_len > 0) {
+			kgl_memcpy(header->buf, val, val_len);
+		}
 		header->val_len = val_len;
 		break;
 	}

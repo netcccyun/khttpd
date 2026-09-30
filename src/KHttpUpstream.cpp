@@ -60,10 +60,6 @@ KGL_RESULT KHttpUpstream::send_header_complete()
 KGL_RESULT KHttpUpstream::read_header()
 {
 	read_header_time = kgl_current_sec;
-	assert(ctx.read_buffer == NULL || ctx.read_buffer->used==0);
-	if (ctx.read_buffer != NULL && ctx.read_buffer->used>0) {
-		return KGL_EUNKNOW;
-	}
 	assert(stack.header);
 	KGL_RESULT result = KGL_OK;
 	khttp_parser parser;
@@ -72,17 +68,22 @@ KGL_RESULT KHttpUpstream::read_header()
 		ctx.read_buffer = ks_buffer_new(8192);
 	}
 	int64_t begin_time_msec = kgl_current_msec;
-	bool received_data = false;
+	/* data left by a previous interim (1xx) response must be parsed first. */
+	bool received_data = ctx.read_buffer->used > 0;
+	bool need_read = !received_data;
 	for (;;) {
 	continue_read:
-		int write_len;
-		char* write_buf = ks_get_write_buffer(ctx.read_buffer, &write_len);
-		int got = kfiber_net_read(cn, write_buf, write_len);
-		if (got <= 0) {
-			return received_data ? KGL_EDATA_FORMAT : KGL_ESOCKET_BROKEN;
+		if (need_read) {
+			int write_len;
+			char* write_buf = ks_get_write_buffer(ctx.read_buffer, &write_len);
+			int got = kfiber_net_read(cn, write_buf, write_len);
+			if (got <= 0) {
+				return received_data ? KGL_EDATA_FORMAT : KGL_ESOCKET_BROKEN;
+			}
+			received_data = true;
+			ks_write_success(ctx.read_buffer, got);
 		}
-		received_data = true;
-		ks_write_success(ctx.read_buffer, got);
+		need_read = true;
 		khttp_parse_result rs;
 		char* hot = ctx.read_buffer->buf;
 		char* end = ctx.read_buffer->buf + ctx.read_buffer->used;

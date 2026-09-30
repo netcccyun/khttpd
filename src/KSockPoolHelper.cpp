@@ -112,6 +112,7 @@ KSockPoolHelper::KSockPoolHelper() {
 	error_count = 0;
 	flags = 0;
 	max_error_count = 5;
+	error_try_time = ERROR_RECONNECT_TIME;
 	weight = 1;
 #ifdef ENABLE_UPSTREAM_SSL
 #ifdef ENABLE_UPSTREAM_HTTP2
@@ -371,8 +372,10 @@ bool KSockPoolHelper::setHostPort(KString host, const char* port) {
 	return setHostPort(host, atoi(port), s);
 }
 void KSockPoolHelper::disable() {
+	lock.Lock();
+	try_time = kgl_current_sec + get_error_try_time();
 	disable_flag = 1;
-
+	lock.Unlock();
 }
 bool KSockPoolHelper::is_enabled() {
 	if (disable_flag) {
@@ -380,13 +383,25 @@ bool KSockPoolHelper::is_enabled() {
 	}
 	return true;
 }
+bool KSockPoolHelper::is_available() {
+	lock.Lock();
+	bool available = !disable_flag;
+	if (!available && max_error_count > 0 && kgl_current_sec >= try_time) {
+		try_time = kgl_current_sec + get_error_try_time();
+		available = true;
+	}
+	lock.Unlock();
+	return available;
+}
 void KSockPoolHelper::shutdown() {
 	monitor = 0;
 	refresh(0);
 }
 void KSockPoolHelper::enable() {
+	lock.Lock();
 	disable_flag = 0;
 	katom_set16((void*)&error_count, 0);
+	lock.Unlock();
 }
 
 bool KSockPoolHelper::parse(const KXmlAttribute& attr) {

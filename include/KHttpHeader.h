@@ -56,7 +56,12 @@ inline KHttpHeader* new_pool_http_know_header(kgl_pool_t* pool, kgl_header_type 
 	KHttpHeader* header = (KHttpHeader*)(pool ? kgl_pnalloc(pool, sizeof(KHttpHeader)) : xmalloc(sizeof(KHttpHeader)));
 	memset(header, 0, sizeof(KHttpHeader));
 	header->header_in_pool = !!pool;
-	kgl_build_know_header_value(pool, header, val, val_len);
+	if (!kgl_build_know_header_value(pool, header, val, val_len)) {
+		if (!pool) {
+			xfree(header);
+		}
+		return NULL;
+	}
 	header->know_header = (uint16_t)type;
 	header->name_is_know = 1;
 	return header;

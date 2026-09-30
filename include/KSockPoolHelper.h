@@ -89,6 +89,8 @@ public:
 	void disable();
 	void enable();
 	bool is_enabled();
+	/* like is_enabled, but a disabled node without monitor is retried after error_try_time. */
+	bool is_available();
 	void setIp(const char* ip) {
 		lock.Lock();
 		if (this->ip) {
@@ -114,6 +116,7 @@ public:
 	volatile uint64_t total_connect = 0;
 	int avg_monitor_tick = 0;
 	int error_try_time;
+	time_t try_time = 0;
 	/*
 	 * 连续错误连接次数，如果超过MAX_ERROR_COUNT次，就会认为是问题的。
 	 * 下次试连接时间会从当前时间加ERROR_RECONNECT_TIME秒。
