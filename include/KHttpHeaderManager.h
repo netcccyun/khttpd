@@ -179,20 +179,23 @@ public:
 	}
 	KHttpHeader* remove(const char* attr, int attr_len) {
 		KHttpHeader* l = header;
-		last = NULL;
+		KHttpHeader* prev = NULL;
 		while (l) {
 			if (kgl_is_attr(l, attr, attr_len)) {
-				if (last) {
-					last->next = l->next;
+				if (prev) {
+					prev->next = l->next;
 				} else {
 					header = l->next;
 				}
+				if (last == l) {
+					last = prev;
+				}
+				l->next = NULL;
 				return l;
 			}
-			last = l;
+			prev = l;
 			l = l->next;
 		}
-		assert((header == NULL && last == NULL) || (header != NULL && last->next == NULL));
 		return NULL;
 	}
 	KHttpHeader* get_header() {
