@@ -259,6 +259,9 @@ KString KXml::decode(const KString &str) {
 	return replace(str.c_str(), transfer);
 }
 int KXml::getLine() {
+	if (hot == NULL || origBuf == NULL || hot < origBuf) {
+		return line;
+	}
 	char* buf = origBuf;
 	//int l = line;
 	int len = (int)(hot - buf);
@@ -434,6 +437,10 @@ bool KXml::internelParseString(char* buf) {
 						break;
 					}
 					continue;
+				}
+				if (contexts.size() >= KXML_MAX_DEPTH) {
+					//node tree is released recursively, deep nesting can overflow the fiber stack.
+					throw KXmlException("xml nesting is too deep");
 				}
 				contexts.push_back(curContext);
 			} catch (const KXmlException& e2) {

@@ -229,6 +229,10 @@ namespace khttpd {
 		if (!body) {
 			return NULL;
 		}
+		if (index != last_pos && index > old_node->get_body_count()) {
+			//KAutoArray::insert throw out_of_range
+			index = last_pos;
+		}
 		old_node->insert_body(body, index);
 		if (index == last_pos) {
 			/* append() means document order, not "after the same tag" */
@@ -286,6 +290,24 @@ namespace khttpd {
 		}
 		out->write_all(_KS("\""));
 	}
+	static void write_xml_text(KWStream* out, const KString& value) {
+		for (size_t i = 0; i < value.size(); ++i) {
+			switch (value[i]) {
+			case '&':
+				out->write_all(_KS("&amp;"));
+				break;
+			case '<':
+				out->write_all(_KS("&lt;"));
+				break;
+			case '>':
+				out->write_all(_KS("&gt;"));
+				break;
+			default:
+				out->write_all(value.c_str() + i, 1);
+				break;
+			}
+		}
+	}
 
 	KGL_RESULT KXmlNodeBody::write(KWStream* out, int level) const {
 		//write attribute
@@ -322,12 +344,15 @@ namespace khttpd {
 			}
 		}
 		if (text) {
-			if (memchr(text->c_str(), '<', text->size())) {
+			if (kgl_memstr(text->c_str(), text->size(), _KS("]]>"))) {
+				//cann't be put in CDATA, KXml decode entity in text.
+				write_xml_text(out, *text);
+			} else if (memchr(text->c_str(), '<', text->size())) {
 				out->write_all(_KS(CDATA_START));
 				out->write_all(text->c_str(), (int)text->size());
 				out->write_all(_KS(CDATA_END));
 			} else {
-				out->write_all(text->c_str(), (int)text->size());
+				write_xml_text(out, *text);
 			}
 			if (!child_order.empty()) {
 				out->write_all(_KS("\n"));

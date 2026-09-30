@@ -17,10 +17,17 @@ restart:
 		if (next_line == NULL) {
 			if (chunk_size == KHTTPD_CHUNK_STATUS_READ_END) {
 				*buf = end;
+			} else if (end - (*buf) > KHTTPD_MAX_TRAILER_LINE) {
+				chunk_size = KHTTPD_CHUNK_STATUS_IS_FAILED;
+				return KDechunkResult::Failed;
 			}
 			return KDechunkResult::Continue;
 		}
 		if (chunk_size == KHTTPD_CHUNK_STATUS_READ_LAST) {
+			if (next_line - (*buf) > KHTTPD_MAX_TRAILER_LINE) {
+				chunk_size = KHTTPD_CHUNK_STATUS_IS_FAILED;
+				return KDechunkResult::Failed;
+			}
 			//trim left
 			while ((*buf) < next_line && isspace((unsigned char)*(*buf))) {
 				(*buf)++;
@@ -34,6 +41,10 @@ restart:
 				(*buf) = next_line + 1;
 				chunk_size = KHTTPD_CHUNK_STATUS_IS_END;
 				return KDechunkResult::End;
+			}
+			if (++trailer_count > KHTTPD_MAX_TRAILER_COUNT) {
+				chunk_size = KHTTPD_CHUNK_STATUS_IS_FAILED;
+				return KDechunkResult::Failed;
 			}
 			*piece = *buf;
 			*piece_length = (int)(trailer_end - (*buf) + 1);
@@ -64,6 +75,13 @@ restart:
 				}
 				if (KBIT_TEST(chunk_size, KHTTPD_CHUNK_PART_SIZE_END) == KHTTPD_CHUNK_PART_SIZE_END) {
 					goto next_buf;
+				}
+				if (((chunk_size) & ~(KHTTPD_CHUNK_STATUS_PREFIX)) > (KHTTPD_MAX_CHUNK_SIZE >> 4)) {
+					//next digit will overflow uint32 and may wrap to a small size.
+					if ((ch >= '0' && ch <= '9') || ((ch | 0x20) >= 'a' && (ch | 0x20) <= 'f')) {
+						chunk_size = KHTTPD_CHUNK_STATUS_IS_FAILED;
+						return KDechunkResult::Failed;
+					}
 				}
 				if (ch >= '0' && ch <= '9') {
 					uint32_t new_chunk_size = ((chunk_size) & ~(KHTTPD_CHUNK_STATUS_PREFIX)) * 16 + (ch - '0');
@@ -108,4 +126,3 @@ restart:
 		return KDechunkResult::Success;
 	}
 }
-

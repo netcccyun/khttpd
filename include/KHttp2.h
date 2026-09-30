@@ -336,7 +336,6 @@ public:
 		if (rst) {
 			return false;
 		}
-		kassert(!destroy_by_http2);
 		if (destroy_by_http2) {
 			return false;
 		}
@@ -488,6 +487,9 @@ public:
 public:
 	void server(kconnection* c);
 	bool init_h2c(kconnection* c, const char* buf, int len);
+	static bool h2c_buffer_fit(int len) {
+		return len >= 0 && (size_t)len <= sizeof(((kgl_http_v2_state_t*)0)->buffer);
+	}
 	void server_h2c(int got);
 	kselector* getSelector();
 #ifdef ENABLE_UPSTREAM_HTTP2

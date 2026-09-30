@@ -332,6 +332,10 @@ public:
 				return data.parse_http_version((u_char*)val, val_len);
 			}
 			if (kgl_mem_same(attr, attr_len, kgl_expand_string(":path"))) {
+				if (data.raw_url.path || data.raw_url.param || val_len == 0 ||
+					(val[0] != '/' && !(val_len == 1 && val[0] == '*'))) {
+					return false;
+				}
 				return parse_url(val, val_len, &data.raw_url);
 			}
 			if (kgl_mem_same(attr, attr_len, kgl_expand_string(":authority"))) {

@@ -62,6 +62,9 @@ static kev_result h2c_process(KOPAQUE data, void* arg, int got) {
 	return kev_ok;
 }
 bool KHttpSink::switch_h2c() {
+	if (!KHttp2::h2c_buffer_fit(buffer.used)) {
+		return false;
+	}
 	KHttp2* http2 = new KHttp2();
 	selectable_bind_opaque(&cn->st, http2);
 	if (!http2->init_h2c(cn, buffer.buf, buffer.used)) {

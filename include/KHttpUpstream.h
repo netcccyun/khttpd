@@ -31,6 +31,13 @@ public:
 	int read(char* buf, int len) override;
 	KGL_RESULT send_header_complete() override;
 	KGL_RESULT read_header() override;
+	void gc(int life_time) override {
+		if (ctx.read_buffer && ctx.read_buffer->used > 0) {
+			//upstream sent more data than expected, the connection state is unknown.
+			life_time = -1;
+		}
+		KTcpUpstream::gc(life_time);
+	}
 	void clean() override;
 private:
 	KUpstreamContext ctx;

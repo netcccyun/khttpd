@@ -21,6 +21,8 @@ enum class KDechunkResult
 #define dechunk_status   KDechunkResult
 
 #define KHTTPD_MAX_CHUNK_SIZE      0x1FFFFFFF    /* 000111----1 */
+#define KHTTPD_MAX_TRAILER_LINE    16384
+#define KHTTPD_MAX_TRAILER_COUNT   64
 #define KHTTPD_CHUNK_STATUS_PREFIX 0xE0000000    /* 1110------0 */
 #define KHTTPD_CHUNK_PART_SIZE_END 0xA0000000    /* 1010------0 */
 #define KHTTPD_CHUNK_STATUS        0xC0000000    /* 1100------0 */
@@ -38,6 +40,7 @@ public:
 	KDechunkEngine()
 	{
 		chunk_size = KHTTPD_CHUNK_STATUS_READ_SIZE;
+		trailer_count = 0;
 	}
 	//piece_length是in,out参数，in时指示最大块长度
 	//如果返回的是trailer数据，piece_length会忽略传进来的值。
@@ -50,6 +53,7 @@ public:
 	}
 private:
 	uint32_t chunk_size;
+	uint32_t trailer_count;
 };
 
 class KDechunkReader

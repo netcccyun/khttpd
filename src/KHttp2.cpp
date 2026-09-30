@@ -7,6 +7,7 @@
 #include "kfiber.h"
 #include "KHttpServer.h"
 #include "KHttpKeyValue.h"
+#include "KHttpParser.h"
 #include "klog.h"
 #include "KPreRequest.h"
 
@@ -401,7 +402,34 @@ bool KHttp2::add_cookie(kgl_http_v2_header_t* header) {
 
 	return true;
 }
-
+/* RFC 9113 8.2.1: CR/LF/NUL must not be forwarded to a HTTP/1.x upstream. */
+static bool kgl_http_v2_valid_header(const kgl_http_v2_header_t* header) {
+	const u_char* p = (const u_char*)header->name.data;
+	const u_char* e = p + header->name.len;
+	if (p < e && *p == ':') {
+		p++;
+	}
+	if (p == e) {
+		return false;
+	}
+	for (; p < e; p++) {
+		u_char ch = *p;
+		if (!khttp_is_token(ch) || (ch >= 'A' && ch <= 'Z')) {
+			return false;
+		}
+	}
+	p = (const u_char*)header->value.data;
+	e = p + header->value.len;
+	if (p < e && (*p == ' ' || *p == '\t' || e[-1] == ' ' || e[-1] == '\t')) {
+		return false;
+	}
+	for (; p < e; p++) {
+		if (*p == '\0' || *p == '\r' || *p == '\n') {
+			return false;
+		}
+	}
+	return true;
+}
 
 u_char* KHttp2::state_process_header(u_char* pos, u_char* end) {
 	size_t                      len;
@@ -454,7 +482,12 @@ u_char* KHttp2::state_process_header(u_char* pos, u_char* end) {
 	if (header->name.data == NULL || header->value.data == NULL) {
 		return state_header_complete(pos, end);
 	}
-	if (!client_model &&
+	if (!client_model && !kgl_http_v2_valid_header(header)) {
+		klog(KLOG_WARNING, "http2 client sent invalid header on stream [%u]\n", state.sid);
+		terminate_stream(stream, KGL_HTTP_V2_PROTOCOL_ERROR);
+		return state_header_complete(pos, end);
+	}
+	if (!client_model && !stream->parsed_header &&
 		header->name.len == cookie.len &&
 		memcmp(header->name.data, cookie.data, cookie.len) == 0) {
 		if (!add_cookie(header)) {
@@ -597,7 +630,7 @@ bool KHttp2::on_header_success(KHttp2Context* stream) {
 	if (!stream->is_available()) {
 		return true;
 	}
-	if (!client_model) {
+	if (!client_model && !stream->parsed_header) {
 		if (!construct_cookie_header(stream, stream->sink)) {
 			return false;
 		}
@@ -891,11 +924,13 @@ void KHttp2::release_stream(KHttp2Context* ctx) {
 		ctx->write_wait = NULL;
 	}
 	if (!ctx->out_closed || !ctx->in_closed) {
+		//response is complete, only the request body is not read: RFC 9113 8.1 use NO_ERROR.
+		uint32_t status = ctx->out_closed ? KGL_HTTP_V2_NO_ERROR : KGL_HTTP_V2_INTERNAL_ERROR;
 		ctx->out_closed = 1;
 		ctx->in_closed = 1;
 		ctx->rst = 1;
 		if (ctx->node) {
-			send_rst_stream(ctx->node->id, KGL_HTTP_V2_INTERNAL_ERROR);
+			send_rst_stream(ctx->node->id, status);
 		}
 	}
 	if (ctx->node) {
@@ -1003,7 +1038,9 @@ bool KHttp2::check_recv_window(KHttp2Context* http2_ctx) {
 	if (recv_window < KGL_HTTP_V2_STREAM_RECV_WINDOW / 4) {
 		//printf("stream [%d] recv_window is too small stream_recv_window=[%d],add_read_buffer size=[%d]\n", http2_ctx->node->id, http2_ctx->recv_window, recv_window);
 		bool send_window_flag = send_window_update(http2_ctx->node->id, KGL_HTTP_V2_STREAM_RECV_WINDOW - http2_ctx->recv_window);
-		http2_ctx->recv_window = KGL_HTTP_V2_STREAM_RECV_WINDOW;
+		if (send_window_flag) {
+			http2_ctx->recv_window = KGL_HTTP_V2_STREAM_RECV_WINDOW;
+		}
 		return send_window_flag;
 	}
 	return false;
@@ -1043,6 +1080,7 @@ bool KHttp2::terminate_stream(KHttp2Context* ctx, uint32_t status) {
 	}
 	if (we) {
 		we->on_write(-1);
+		delete we;
 	}
 	return send_flag;
 }
@@ -1661,6 +1699,9 @@ u_char* KHttp2::state_data(u_char* pos, u_char* end) {
 	recv_window -= window_size;
 	if (recv_window < KGL_HTTP_V2_CONNECTION_RECV_WINDOW / 4) {
 		send_window_flag = send_window_update(0, KGL_HTTP_V2_CONNECTION_RECV_WINDOW - recv_window);
+		if (!send_window_flag) {
+			return this->close(true, KGL_HTTP_V2_ENHANCE_YOUR_CALM);
+		}
 		recv_window = KGL_HTTP_V2_CONNECTION_RECV_WINDOW;
 	}
 
@@ -1899,9 +1940,9 @@ u_char* KHttp2::state_headers(u_char* pos, u_char* end) {
 			klog(KLOG_WARNING, "http2 stream is not available [%d]\n", state.sid);
 			return state_skip_headers(pos, end);
 		}
-		state.pool = stream->sink->pool;
-		state.keep_pool = 1;
-		kassert(state.pool);
+		//the sink (and its pool) may be destroyed by the request fiber before the trailer is fully parsed.
+		state.pool = kgl_create_pool(KGL_REQUEST_POOL_SIZE);
+		state.keep_pool = 0;
 		kassert(state.stream == NULL);
 		state.stream = stream;
 		stream->in_closed = 1;
@@ -2360,13 +2401,10 @@ void KHttp2::ReleaseStateStream() {
 		//incomplete stream
 		kassert(state.stream->sink);
 		if (state.stream->sink) {
-			KSink* rq = state.stream->sink;
-#ifndef NDEBUG
-			//调试模式时，~KHttp2Sink里面会对ctx有检查。
-			KHttp2Sink* sink = static_cast<KHttp2Sink*>(rq);
+			KHttp2Sink* sink = static_cast<KHttp2Sink*>(state.stream->sink);
+			//processing was not increased for this stream, ~KHttp2Sink must not call release(ctx).
 			sink->ctx = NULL;
-#endif
-			delete rq;
+			delete sink;
 		}
 		destroy_node(state.stream->node);
 		state.stream->Destroy();

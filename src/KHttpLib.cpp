@@ -663,6 +663,10 @@ bool parse_url(const char* src, size_t len, kgl_url * url) {
 	}
 	host_len = path - host;
 	len -= host_len;
+	if (url->host) {
+		//h2/h3 :authority already set the host.
+		return false;
+	}
 	if (!parse_url_host(url, host, host_len)) {
 		return false;
 	}

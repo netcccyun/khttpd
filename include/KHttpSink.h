@@ -223,6 +223,10 @@ private:
 				return kgl_parse_continue;
 			}
 			case kgl_parse_success:
+				if (rs.bad_name) {
+					//RFC 9112 5.1: whitespace between field name and colon must be rejected.
+					return kgl_parse_error;
+				}
 				if (!parse_header<char*>(rs.attr, rs.attr_len, rs.val, rs.val_len, rs.is_first)) {
 					return kgl_parse_error;
 				}

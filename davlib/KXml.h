@@ -40,6 +40,7 @@
 #define		PARSE_EVENT			1
 #define		PARSE_END			2
 
+#define		KXML_MAX_DEPTH		64
 #define		START_ELEMENT		1
 #define		START_CHAR			2
 #define		END_ELEMENT			3

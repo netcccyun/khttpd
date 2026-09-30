@@ -12,6 +12,10 @@ public:
 		this->ctx = ctx;
 	}
 	~KHttp2Sink() {
+		if (ctx == NULL) {
+			//the stream never started, KHttp2::ReleaseStateStream release it.
+			return;
+		}
 		KBIT_SET(data.flags, RQ_CONNECTION_CLOSE);
 		if (unlikely(ctx->content_left > 0)) {
 			http2->shutdown(ctx);
