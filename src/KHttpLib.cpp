@@ -837,12 +837,13 @@ char* b64decode(const unsigned char* in, int* l) {
 		*s = b[0];
 		s++;
 
-		if (in[i + 1] == B64PAD)
+		/* stop at the end of input too: in[] may end before a group of four */
+		if (i + 1 >= *l || in[i + 1] == B64PAD)
 			break;
 		*s = b[1];
 		s++;
 
-		if (in[i + 2] == B64PAD)
+		if (i + 2 >= *l || in[i + 2] == B64PAD)
 			break;
 		*s = b[2];
 		s++;
