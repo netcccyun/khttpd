@@ -5,6 +5,7 @@
 #include "KHttpParser.h"
 #include "KResponseContext.h"
 #include "KHttpHeader.h"
+#include "KHttpLib.h"
 #include "KDechunkContext.h"
 #include "KHttpServer.h"
 #include "klog.h"
@@ -22,11 +23,15 @@ public:
 		assert(know_header < kgl_header_unknow);
 		note_response_header(kgl_header_type_string[know_header].value.data, (int)kgl_header_type_string[know_header].value.len, val, val_len);
 		rc.head_append(pool, kgl_header_type_string[know_header].http11.data, (uint16_t)kgl_header_type_string[know_header].http11.len);
-		if (lock_value) {
+		bool unsafe = kgl_header_has_ctl(val, val_len);
+		if (lock_value && !unsafe) {
 			rc.head_append(pool, val, val_len);
 		} else {
 			char* buf = (char*)kgl_pnalloc(pool, val_len);
 			memcpy(buf, val, val_len);
+			if (unsafe) {
+				kgl_header_strip_ctl(buf, val_len);
+			}
 			rc.head_append(pool, buf, (uint16_t)val_len);
 		}
 		return true;
@@ -39,10 +44,12 @@ public:
 		kgl_memcpy(hot, "\r\n", 2);
 		hot += 2;
 		kgl_memcpy(hot, name, name_len);
+		kgl_header_strip_ctl(hot, name_len);
 		hot += name_len;
 		kgl_memcpy(hot, ": ", 2);
 		hot += 2;
 		kgl_memcpy(hot, val, val_len);
+		kgl_header_strip_ctl(hot, val_len);
 		hot += val_len;
 		rc.head_append(pool, buf, len);
 		return true;

@@ -2,6 +2,7 @@
 #include "KHttpKeyValue.h"
 #include "KHttpParser.h"
 #include "KTcpServerSink.h"
+#include "KHttpLib.h"
 
 bool KHttpUpstream::send_connection(const char* val, hlen_t val_len)
 {
@@ -16,7 +17,26 @@ bool KHttpUpstream::send_method_path(uint16_t meth, const char* path, hlen_t pat
 	kgl_str_t *meth_str = KHttpKeyValue::get_method(meth);
 	krw_write_str(ctx.send_header_buffer, meth_str->data, (int)meth_str->len);
 	krw_write_str(ctx.send_header_buffer, kgl_expand_string(" "));
-	krw_write_str(ctx.send_header_buffer, path, path_len);
+	/* A space or control byte would end the request target early (a rewrite
+	 * can put decoded bytes into the path or query), so send it encoded. */
+	static const char hex[] = "0123456789ABCDEF";
+	const char* start = path;
+	const char* end = path + path_len;
+	for (const char* p = path; p < end; p++) {
+		unsigned char c = (unsigned char)*p;
+		if (c > 0x20 && c != 0x7f) {
+			continue;
+		}
+		if (p > start) {
+			krw_write_str(ctx.send_header_buffer, start, (int)(p - start));
+		}
+		char esc[3] = { '%', hex[c >> 4], hex[c & 15] };
+		krw_write_str(ctx.send_header_buffer, esc, 3);
+		start = p + 1;
+	}
+	if (end > start) {
+		krw_write_str(ctx.send_header_buffer, start, (int)(end - start));
+	}
 	krw_write_str(ctx.send_header_buffer, kgl_expand_string(" HTTP/1.1\r\n"));
 	return true;
 }
@@ -24,6 +44,18 @@ bool KHttpUpstream::send_header(const char* attr, hlen_t attr_len, const char* v
 {
 	if (this->ctx.send_header_buffer == NULL) {
 		return false;
+	}
+	if (kgl_header_has_ctl(attr, attr_len) || kgl_header_has_ctl(val, val_len)) {
+		char* clean = (char*)malloc((size_t)attr_len + val_len + 1);
+		if (!clean) {
+			return false;
+		}
+		kgl_memcpy(clean, attr, attr_len);
+		kgl_memcpy(clean + attr_len, val, val_len);
+		kgl_header_strip_ctl(clean, (size_t)attr_len + val_len);
+		bool result = send_header(clean, attr_len, clean + attr_len, val_len);
+		free(clean);
+		return result;
 	}
 	//printf("%.*s: %.*s\n", attr_len, attr, val_len, val);
 	krw_write_str(ctx.send_header_buffer, attr, attr_len);

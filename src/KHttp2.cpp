@@ -1295,6 +1295,17 @@ bool KHttp2::add_status(KHttp2Context* ctx, uint16_t status_code) {
 	return true;
 }
 bool KHttp2::add_header(KHttp2Context* ctx, kgl_header_type name, const char* val, hlen_t val_len) {
+	if (kgl_header_has_ctl(val, val_len)) {
+		char* clean = (char*)malloc(val_len);
+		if (!clean) {
+			return false;
+		}
+		kgl_memcpy(clean, val, val_len);
+		kgl_header_strip_ctl(clean, val_len);
+		bool result = add_header(ctx, name, clean, val_len);
+		free(clean);
+		return result;
+	}
 	while (val_len && (*val == ' ' || *val == '\t')) { ++val; --val_len; }
 	while (val_len && (val[val_len-1] == ' ' || val[val_len-1] == '\t')) --val_len;
 	if (ctx->send_header == NULL) {
@@ -1324,6 +1335,18 @@ bool KHttp2::add_header_cookie(KHttp2Context* ctx, const char* val, hlen_t val_l
 	return true;
 }
 bool KHttp2::add_header(KHttp2Context* ctx, const char* name, hlen_t name_len, const char* val, hlen_t val_len) {
+	if (kgl_header_has_ctl(name, name_len) || kgl_header_has_ctl(val, val_len)) {
+		char* clean = (char*)malloc((size_t)name_len + val_len + 1);
+		if (!clean) {
+			return false;
+		}
+		kgl_memcpy(clean, name, name_len);
+		kgl_memcpy(clean + name_len, val, val_len);
+		kgl_header_strip_ctl(clean, (size_t)name_len + val_len);
+		bool result = add_header(ctx, clean, name_len, clean + name_len, val_len);
+		free(clean);
+		return result;
+	}
 	// HTTP/2 field values cannot start or end with optional whitespace.
 	if (name_len && name[0] != ':') {
 		while (val_len && (*val == ' ' || *val == '\t')) { ++val; --val_len; }

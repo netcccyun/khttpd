@@ -62,9 +62,11 @@ bool KHttpSink::response_early_hints(const KHttpHeader* headers) {
 	for (auto h = headers; h; h = h->next) {
 		const char* name = h->name_is_know ? kgl_header_type_string[h->know_header].value.data : h->buf;
 		int name_len = h->name_is_know ? (int)kgl_header_type_string[h->know_header].value.len : h->name_len;
+		size_t start = block.size();
 		block.append(name, name_len);
 		block.append(": ");
 		block.append(h->buf + h->val_offset, h->val_len);
+		kgl_header_strip_ctl(&block[start], block.size() - start);
 		block.append("\r\n");
 	}
 	block.append("\r\n");

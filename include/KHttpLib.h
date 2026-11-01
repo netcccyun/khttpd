@@ -172,6 +172,26 @@ inline const char* kgl_skip_space(const char* start, const char* end, bool space
 	return NULL;
 }
 int url_decode(char* str, int len=0, kgl_url* url=NULL, bool space2plus=true);
+/* A header name or value with CR, LF or NUL would end its line early and
+ * let the rest be read as more headers. Values built from decoded URLs
+ * (rewrite captures, redirects) can carry them. */
+inline bool kgl_header_has_ctl(const char* s, size_t len) {
+	for (size_t i = 0; i < len; i++) {
+		char c = s[i];
+		if (c == '\r' || c == '\n' || c == '\0') {
+			return true;
+		}
+	}
+	return false;
+}
+/* replace CR, LF and NUL with spaces */
+inline void kgl_header_strip_ctl(char* s, size_t len) {
+	for (size_t i = 0; i < len; i++) {
+		if (s[i] == '\r' || s[i] == '\n' || s[i] == '\0') {
+			s[i] = ' ';
+		}
+	}
+}
 void CTIME_R(time_t* a, char* b, size_t l);
 inline int kgl_parse_value_time(const char* val, int val_len, time_t* value) {
 	time_t parsed;
