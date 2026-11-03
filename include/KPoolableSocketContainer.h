@@ -16,6 +16,11 @@ void SafeDestroyUpstream(KUpstream *st);
 /*
  * 连接池容器类
  */
+/*
+ * Idle connections. List 0 holds connections not bound to a selector (and
+ * multi-stream ones); list sid+1 holds connections kept bound to selector sid,
+ * so the worker thread can reuse them without touching epoll.
+ */
 class KPoolableSocketContainerImp {
 public:
 	KPoolableSocketContainerImp();
@@ -24,11 +29,30 @@ public:
 	void refreshList(kgl_list *l, bool clean);
 	kgl_list *GetList()
 	{
-		return &head;
-	}	
+		return &lists[0];
+	}
+	/* the list for connections bound to selector, or NULL if it has none */
+	kgl_list *GetSelectorList(kselector *selector)
+	{
+		if (selector == NULL || selector->sid < 0 || selector->sid + 1 >= list_count) {
+			return NULL;
+		}
+		return &lists[selector->sid + 1];
+	}
+	int GetListCount()
+	{
+		return list_count;
+	}
+	kgl_list *GetListAt(int index)
+	{
+		return &lists[index];
+	}
+	/* take the newest connection from a list of bound connections */
+	KUpstream *TakeBound(kgl_list *head, uint32_t flags, bool own_selector);
 	unsigned size;
 protected:
-	kgl_list head;
+	kgl_list *lists;
+	int list_count;
 };
 class KPoolableSocketContainer: public KAtomCountable {
 public:
@@ -119,6 +143,9 @@ protected:
 private:
 	
 	KUpstream *internalGetPoolSocket(uint32_t flags);
+	KUpstream *internalGetUnboundSocket(uint32_t flags);
+	/* runs on the selector that owns arg's connection */
+	static int kfiber_unbind_upstream(void* arg, int got);
 	time_t getHttp2ExpireTime()
 	{
 		int life_time = this->life_time;

@@ -34,6 +34,12 @@ int kfiber_next_destroy(void* arg, int got)
 	st->Destroy();
 	return 0;
 }
+int KPoolableSocketContainer::kfiber_unbind_upstream(void* arg, int got)
+{
+	KUpstream* st = (KUpstream*)arg;
+	st->unbind_selector();
+	return 0;
+}
 void SafeDestroyUpstream(KUpstream *st)
 {
 	kselector *selector = st->get_connection()->st.base.selector;
@@ -66,16 +72,28 @@ KPoolableSocketContainerImp::KPoolableSocketContainerImp()
 {
 	//assert(is_selector_manager_init());
 	size = 0;
-	klist_init(&head);
+	list_count = 1;
+#ifndef _WIN32
+	/* worker threads added later use list 0, as before */
+	list_count += KGL_MAX(get_selector_count(), 0);
+#endif
+	lists = new kgl_list[list_count];
+	for (int i = 0; i < list_count; i++) {
+		klist_init(&lists[i]);
+	}
 }
 KPoolableSocketContainerImp::~KPoolableSocketContainerImp()
 {
-	kassert(head.next == &head);
-	kassert(head.prev == &head);
+	for (int i = 0; i < list_count; i++) {
+		kassert(klist_empty(&lists[i]));
+	}
+	delete[] lists;
 }
 void KPoolableSocketContainerImp::refresh(bool clean)
 {
-	refreshList(&head,clean);
+	for (int i = 0; i < list_count; i++) {
+		refreshList(&lists[i], clean);
+	}
 }
 KPoolableSocketContainer::KPoolableSocketContainer() {
 	flags = 0;
@@ -118,15 +136,26 @@ void KPoolableSocketContainer::gcSocket(KUpstream *st,int life_time) {
 }
 void KPoolableSocketContainer::PutPoolSocket(KUpstream *st)
 {
-	st->unbind_selector();
+	kselector *selector = kgl_get_tls_selector();
+	bool keep_bound = !st->IsMultiStream() && selector != NULL && st->get_connection() &&
+		st->get_connection()->st.base.selector == selector;
+	if (!keep_bound) {
+		st->unbind_selector();
+	}
 	lock.Lock();
 	if (imp == NULL) {
 		imp = new KPoolableSocketContainerImp;
 	}
+	kgl_list *l = keep_bound ? imp->GetSelectorList(selector) : NULL;
+	if (l == NULL) {
+		if (keep_bound) {
+			st->unbind_selector();
+		}
+		l = imp->GetList();
+	}
 	imp->size++;
 	assert(st->container);
 	st->container = NULL;
-	kgl_list *l = imp->GetList();
 	KUpstreamSelectableList *st_list = new KUpstreamSelectableList;
 	st_list->st = st;
 	l = l->next;
@@ -138,6 +167,64 @@ KUpstream *KPoolableSocketContainer::internalGetPoolSocket(uint32_t flags) {
 	if (imp == NULL) {
 		imp = new KPoolableSocketContainerImp;
 	}
+	/* connections this worker thread kept bound: reuse them without epoll_ctl */
+	kgl_list *own_head = imp->GetSelectorList(kgl_get_tls_selector());
+	KUpstream *socket = NULL;
+	if (own_head) {
+		socket = imp->TakeBound(own_head, flags, true);
+		if (socket) {
+			bind(socket);
+			return socket;
+		}
+	}
+	socket = internalGetUnboundSocket(flags);
+	if (socket) {
+		return socket;
+	}
+	/*
+	 * Then connections idle in other worker threads, so threads still share
+	 * them (a backend may accept only a few connections). get_pool_socket
+	 * moves the connection to this thread.
+	 */
+	for (int i = 1; i < imp->GetListCount(); i++) {
+		kgl_list *head = imp->GetListAt(i);
+		if (head == own_head) {
+			continue;
+		}
+		socket = imp->TakeBound(head, flags, false);
+		if (socket) {
+			bind(socket);
+			return socket;
+		}
+	}
+	return NULL;
+}
+KUpstream *KPoolableSocketContainerImp::TakeBound(kgl_list *head, uint32_t flags, bool own_selector) {
+	refreshList(head, false);
+	kgl_list *n = klist_head(head);
+	while (n != head) {
+		KUpstreamSelectableList *st_list = kgl_list_data(n, KUpstreamSelectableList, queue);
+		KUpstream *socket = st_list->st;
+		if (KBIT_TEST(flags, KSOCKET_FLAGS_WEBSOCKET) && !socket->support_websocket()) {
+			return NULL;
+		}
+		kgl_list *next = n->next;
+		size--;
+		klist_remove(n);
+		delete st_list;
+		kconnection *cn = socket->get_connection();
+		/* another thread's flags are only safe to read after moving it */
+		if (own_selector && cn && KBIT_TEST(cn->st.base.st_flags, STF_ERR)) {
+			/* epoll saw the peer close it while idle */
+			SafeDestroyUpstream(socket);
+			n = next;
+			continue;
+		}
+		return socket;
+	}
+	return NULL;
+}
+KUpstream *KPoolableSocketContainer::internalGetUnboundSocket(uint32_t flags) {
 	kgl_list *list_head = imp->GetList();
 	imp->refreshList(list_head, false);
 	KUpstream *socket = NULL;
@@ -207,12 +294,30 @@ KUpstream *KPoolableSocketContainer::get_pool_socket(uint32_t flags) {
 	}
 	socket->read_header_time = kgl_current_sec;
 	kselector *selector = socket->get_connection()->st.base.selector;
-	if (selector!=NULL && selector!=kgl_get_tls_selector()) {
+	kselector *current = kgl_get_tls_selector();
+	if (selector!=NULL && selector!=current) {
+#ifndef _WIN32
+		if (!socket->IsMultiStream() && current && kfiber_self2()) {
+			/* idle in another worker thread: that thread takes it out of its epoll */
+			kfiber *fiber = NULL;
+			if (kfiber_create2(selector, kfiber_unbind_upstream, socket, 0, http_config.fiber_stack_size, &fiber) == 0) {
+				int ret = 0;
+				kfiber_join(fiber, &ret);
+				if (KBIT_TEST(socket->get_connection()->st.base.st_flags, STF_ERR)) {
+					/* the peer closed it while idle */
+					socket->Destroy();
+					return NULL;
+				}
+				socket->bind_selector(current);
+				return socket;
+			}
+		}
+#endif
 		//连接和当前selector不一致,一般发生在windows上，多线程情况上.
 		//因为windows中socket一但绑定了iocp，无法解绑。
 		return new KTsUpstream(socket);
 	}
-	socket->bind_selector(kgl_get_tls_selector());
+	socket->bind_selector(current);
 	return socket;
 }
 void KPoolableSocketContainer::clean()

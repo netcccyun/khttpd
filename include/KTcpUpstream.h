@@ -28,12 +28,36 @@ public:
 	{
 		return this->cn;
 	}
+#ifdef LINUX
+	/* pooled connections are reused for many requests: skip setsockopt calls that change nothing */
+	void set_delay() override {
+		if (!corked) {
+			ksocket_delay(cn->st.fd);
+			corked = 1;
+		}
+	}
+	void set_no_delay(bool forever) override {
+		if (forever) {
+			if (!no_delay) {
+				ksocket_no_delay(cn->st.fd, true);
+				no_delay = 1;
+			}
+			return;
+		}
+		/* on Linux this only removes TCP_CORK */
+		if (corked) {
+			ksocket_no_delay(cn->st.fd, false);
+			corked = 0;
+		}
+	}
+#else
 	void set_delay() override {
 		ksocket_delay(cn->st.fd);
 	}
 	void set_no_delay(bool forever) override {
 		ksocket_no_delay(cn->st.fd, forever);
 	}
+#endif
 	void shutdown() override
 	{
 		selectable_shutdown(&cn->st);
@@ -96,5 +120,7 @@ protected:
 	kconnection *cn;
 	KUpstreamCallBack stack;
 	kgl_pool_t* pool;
+	uint8_t corked = 0;
+	uint8_t no_delay = 0;
 };
 #endif

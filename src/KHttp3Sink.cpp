@@ -318,15 +318,42 @@ int KHttp3Sink::internal_write(WSABUF* buf, int count) {
     }
     return result;
 }
+#define KGL_H3_WRITE_BUF_COUNT 64
 int KHttp3Sink::write_all(const kbuf* buf, int length) {
+    // Hand several buffers to one internal_write: each call waits for an
+    // engine write callback, so one buffer per call made big bodies slow.
     int left = length;
+    int offset = 0; // bytes of buf already written
     while (left > 0 && buf) {
-        if (buf->used < 0) return left;
-        int amount = KGL_MIN(left, buf->used);
-        int remain = write_all(buf->data, amount);
-        left -= amount - remain;
-        if (remain) break;
-        buf = buf->next;
+        WSABUF bufs[KGL_H3_WRITE_BUF_COUNT];
+        int bc = 0;
+        int size = 0;
+        int b_offset = offset;
+        for (const kbuf* b = buf; b && bc < KGL_H3_WRITE_BUF_COUNT && size < left; b = b->next) {
+            if (b->used < 0) return left;
+            int amount = KGL_MIN(left - size, b->used - b_offset);
+            if (amount > 0) {
+                bufs[bc].iov_base = b->data + b_offset;
+                bufs[bc].iov_len = amount;
+                bc++;
+                size += amount;
+            }
+            b_offset = 0;
+        }
+        if (bc == 0) break;
+        int got = internal_write(bufs, bc);
+        if (got <= 0) break;
+        left -= got;
+        while (got > 0 && buf) {
+            int avail = buf->used - offset;
+            if (got < avail) {
+                offset += got;
+                break;
+            }
+            got -= avail;
+            buf = buf->next;
+            offset = 0;
+        }
     }
     return left;
 }
