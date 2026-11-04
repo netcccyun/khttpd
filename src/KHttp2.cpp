@@ -1583,7 +1583,12 @@ int KHttp2::on_write_window_ready(KHttp2Context* http2_ctx) {
 	// Download traffic makes progress through outbound DATA and inbound
 	// WINDOW_UPDATE. Do not classify its control frames as an idle flood.
 	// Empty DATA and control-only replies must not reset the protection.
-	if (len > 0) idle_frames = 0;
+	if (len > 0) {
+		idle_frames = 0;
+		// A peer may answer one large DATA frame with many WINDOW_UPDATEs
+		// (Go sends one per 4KB read), so credit them by bytes, not frames.
+		window_update_credit = (uint32_t)KGL_MIN((uint64_t)window_update_credit + len, (uint64_t)KGL_HTTP_V2_MAX_WINDOW);
+	}
 	http2_ctx->send_window -= len;
 	send_window -= len;
 	write_buffer.push(new_buf);
@@ -1734,6 +1739,9 @@ u_char* KHttp2::state_head(u_char* pos, u_char* end) {
 	//printf("%lld http2=[%p] recv frame sid=[%d] type=[%d] flag=[%d] length=[%d]\n",kgl_current_sec, this,state.sid,type,state.flags,state.length);
 	if (type == KGL_HTTP_V2_HEADERS_FRAME || (type == KGL_HTTP_V2_DATA_FRAME && state.length > 0)) {
 		idle_frames = 0;
+	} else if (type == KGL_HTTP_V2_WINDOW_UPDATE_FRAME && window_update_credit > 0) {
+		// Flow control for DATA we sent is progress, not an idle flood.
+		window_update_credit -= KGL_MIN(window_update_credit, (uint32_t)KGL_HTTP_V2_WINDOW_UPDATE_CREDIT);
 	} else {
 		if (++idle_frames > KGL_HTTP_V2_MAX_IDLE_FRAMES) {
 			klog(KLOG_WARNING, "http2 flood detected, idle frames=%u\n", idle_frames);

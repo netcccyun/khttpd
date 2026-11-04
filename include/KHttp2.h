@@ -147,6 +147,9 @@ bool kgl_http_v2_huff_decode(u_char* state, u_char* src, size_t len, u_char** ds
 #define KGL_HTTP_V2_MAX_FRAMES                   256
 #define KGL_HTTP_V2_MAX_CONTINUATIONS            128
 #define KGL_HTTP_V2_MAX_IDLE_FRAMES              1024
+/* each WINDOW_UPDATE from the peer may return this many DATA bytes we sent
+   without counting as an idle frame */
+#define KGL_HTTP_V2_WINDOW_UPDATE_CREDIT         1024
 
 #define KGL_HTTP_V2_DEFAULT_FRAME_SIZE           (1 << 14)
 #define KGL_HTTP_V2_TABLE_SIZE                   4096
@@ -616,6 +619,8 @@ private:
 	uint32_t init_window;
 	uint32_t frame_size;
 	uint32_t max_stream;
+	/* DATA bytes queued that peer WINDOW_UPDATE frames have not yet answered */
+	uint32_t window_update_credit;
 	uint16_t idle_frames;
 	uint16_t enable_connect : 1;
 	uint16_t write_processing : 1;
