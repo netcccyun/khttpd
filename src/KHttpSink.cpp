@@ -361,7 +361,11 @@ void KHttpSink::start(int header_len) {
 					}
 				}
 				char* new_buf = (char*)xmalloc(buffer.buf_size);
+				/* between requests the connection can be closed to make room
+				 * when connections or file descriptors run out */
+				selectable_set_idle(&cn->st, true);
 				int got = kfiber_net_read(cn, new_buf, buffer.buf_size);
+				selectable_set_idle(&cn->st, false);
 				if (got <= 0) {
 					xfree(new_buf);
 					return;
