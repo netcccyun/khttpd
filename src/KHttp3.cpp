@@ -205,6 +205,269 @@ setup_control_msg(
 #endif
 }
 
+#if defined(__linux__) && !ECN_SUPPORTED
+/* Linux sends and receives QUIC datagrams in batches. ECN would need a
+ * per-datagram TOS, which the batch code does not set, so it stays off then. */
+#define KGL_H3_BATCH_UDP 1
+#include <netinet/udp.h>
+#ifndef SOL_UDP
+#define SOL_UDP 17
+#endif
+#ifndef UDP_SEGMENT
+#define UDP_SEGMENT 103
+#endif
+#define KGL_H3_SEND_BATCH    64    /* datagram messages per sendmmsg() */
+#define KGL_H3_SEND_IOV      1024  /* iovecs shared by those messages */
+#define KGL_H3_GSO_SEGMENTS  64    /* UDP_MAX_SEGMENTS in the kernel */
+#define KGL_H3_GSO_MAX_BYTES 64000 /* stay below the 64KB UDP payload limit */
+#define KGL_H3_RECV_BATCH    32    /* datagrams per recvmmsg() */
+#define KGL_H3_RECV_ROUNDS   8     /* recvmmsg() calls per readable event */
+#define KGL_H3_CTL_SIZE (CMSG_SPACE(sizeof(struct in6_pktinfo)) + CMSG_SPACE(sizeof(uint16_t)))
+struct kgl_h3_udp_batch
+{
+	struct mmsghdr send_msgs[KGL_H3_SEND_BATCH];
+	unsigned send_specs[KGL_H3_SEND_BATCH]; /* lsquic packets carried by each message */
+	struct iovec send_iov[KGL_H3_SEND_IOV];
+	unsigned char send_ctl[KGL_H3_SEND_BATCH][KGL_H3_CTL_SIZE];
+	struct mmsghdr recv_msgs[KGL_H3_RECV_BATCH];
+	struct iovec recv_iov[KGL_H3_RECV_BATCH];
+	sockaddr_i recv_peer[KGL_H3_RECV_BATCH];
+	unsigned char recv_ctl[KGL_H3_RECV_BATCH][sizeof(kudp_extend)];
+	char* recv_buf[KGL_H3_RECV_BATCH];
+};
+void kgl_h3_free_udp_batch(kgl_h3_udp_batch* batch) {
+	for (int i = 0; i < KGL_H3_RECV_BATCH; i++) {
+		if (batch->recv_buf[i]) {
+			xfree(batch->recv_buf[i]);
+		}
+	}
+	xfree(batch);
+}
+static kgl_h3_udp_batch* h3_get_udp_batch(KHttp3ServerEngine* h3_engine) {
+	if (h3_engine->udp_batch) {
+		return h3_engine->udp_batch;
+	}
+	kgl_h3_udp_batch* batch = (kgl_h3_udp_batch*)xmalloc(sizeof(kgl_h3_udp_batch));
+	if (batch == nullptr) {
+		return nullptr;
+	}
+	memset(batch, 0, sizeof(*batch));
+	for (int i = 0; i < KGL_H3_RECV_BATCH; i++) {
+		batch->recv_buf[i] = (char*)xmalloc(MAX_QUIC_UDP_SIZE);
+		if (batch->recv_buf[i] == nullptr) {
+			kgl_h3_free_udp_batch(batch);
+			return nullptr;
+		}
+	}
+	h3_engine->udp_batch = batch;
+	return batch;
+}
+static inline unsigned h3_spec_size(const struct lsquic_out_spec* spec) {
+	size_t size = 0;
+	for (size_t i = 0; i < spec->iovlen; i++) {
+		size += spec->iov[i].iov_len;
+	}
+	return (unsigned)size;
+}
+static inline socklen_t h3_sockaddr_len(const struct sockaddr* sa) {
+	return AF_INET == sa->sa_family ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
+}
+/* Packets can share one GSO send only if they go the same way. */
+static bool h3_same_path(const struct lsquic_out_spec* a, const struct lsquic_out_spec* b, bool src_ip) {
+	if (a->peer_ctx != b->peer_ctx || a->dest_sa->sa_family != b->dest_sa->sa_family) {
+		return false;
+	}
+	if (a->dest_sa != b->dest_sa && memcmp(a->dest_sa, b->dest_sa, h3_sockaddr_len(a->dest_sa)) != 0) {
+		return false;
+	}
+	if (!src_ip || a->local_sa == b->local_sa) {
+		return true;
+	}
+	return a->local_sa->sa_family == b->local_sa->sa_family &&
+		(a->local_sa->sa_family == 0 || memcmp(a->local_sa, b->local_sa, h3_sockaddr_len(a->local_sa)) == 0);
+}
+static size_t h3_build_control(unsigned char* buf, const struct lsquic_out_spec* spec, bool src_ip, uint16_t gso_size) {
+	struct msghdr msg;
+	memset(&msg, 0, sizeof(msg));
+	memset(buf, 0, KGL_H3_CTL_SIZE);
+	msg.msg_control = buf;
+	msg.msg_controllen = KGL_H3_CTL_SIZE;
+	struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+	size_t len = 0;
+	if (src_ip && spec->local_sa->sa_family) {
+		if (AF_INET == spec->dest_sa->sa_family) {
+			struct in_pktinfo info;
+			memset(&info, 0, sizeof(info));
+			info.ipi_spec_dst = ((const struct sockaddr_in*)spec->local_sa)->sin_addr;
+			cmsg->cmsg_level = IPPROTO_IP;
+			cmsg->cmsg_type = IP_PKTINFO;
+			cmsg->cmsg_len = CMSG_LEN(sizeof(info));
+			memcpy(CMSG_DATA(cmsg), &info, sizeof(info));
+			len += CMSG_SPACE(sizeof(info));
+		} else {
+			struct in6_pktinfo info6;
+			memset(&info6, 0, sizeof(info6));
+			info6.ipi6_addr = ((const struct sockaddr_in6*)spec->local_sa)->sin6_addr;
+			cmsg->cmsg_level = IPPROTO_IPV6;
+			cmsg->cmsg_type = IPV6_PKTINFO;
+			cmsg->cmsg_len = CMSG_LEN(sizeof(info6));
+			memcpy(CMSG_DATA(cmsg), &info6, sizeof(info6));
+			len += CMSG_SPACE(sizeof(info6));
+		}
+		cmsg = CMSG_NXTHDR(&msg, cmsg);
+	}
+	if (gso_size > 0) {
+		cmsg->cmsg_level = SOL_UDP;
+		cmsg->cmsg_type = UDP_SEGMENT;
+		cmsg->cmsg_len = CMSG_LEN(sizeof(uint16_t));
+		memcpy(CMSG_DATA(cmsg), &gso_size, sizeof(uint16_t));
+		len += CMSG_SPACE(sizeof(uint16_t));
+	}
+	return len;
+}
+/* Send lsquic packets with as few system calls as possible:
+ * runs of equal-size packets to one peer become one GSO datagram message,
+ * and up to KGL_H3_SEND_BATCH messages go out in one sendmmsg().
+ * Returns the number of packets sent, -1 on error, or -2 when out of memory. */
+static int h3_send_packets_batch(KHttp3ServerEngine* h3_engine, const struct lsquic_out_spec* specs, unsigned count) {
+	kgl_h3_udp_batch* batch = h3_get_udp_batch(h3_engine);
+	if (batch == nullptr) {
+		return -2;
+	}
+	unsigned sent = 0;
+	int saved_errno = 0;
+	while (sent < count) {
+		KHttp3ServerEngine* peer_engine = (KHttp3ServerEngine*)specs[sent].peer_ctx;
+		bool src_ip = peer_engine->allow_src_ip();
+		bool gso = h3_engine->udp_gso;
+		unsigned nmsg = 0, niov = 0, n = sent;
+		while (n < count && nmsg < KGL_H3_SEND_BATCH) {
+			const struct lsquic_out_spec* first = &specs[n];
+			/* one sendmmsg() writes to one socket */
+			if (first->peer_ctx != peer_engine || niov + first->iovlen > KGL_H3_SEND_IOV) {
+				break;
+			}
+			struct msghdr* msg = &batch->send_msgs[nmsg].msg_hdr;
+			memset(msg, 0, sizeof(*msg));
+			msg->msg_name = (void*)first->dest_sa;
+			msg->msg_namelen = h3_sockaddr_len(first->dest_sa);
+			msg->msg_iov = &batch->send_iov[niov];
+			memcpy(&batch->send_iov[niov], first->iov, first->iovlen * sizeof(struct iovec));
+			niov += (unsigned)first->iovlen;
+			unsigned seg_size = h3_spec_size(first);
+			unsigned total = seg_size, segs = 1;
+			++n;
+			if (gso && seg_size > 0) {
+				while (n < count && segs < KGL_H3_GSO_SEGMENTS && h3_same_path(first, &specs[n], src_ip)) {
+					unsigned size = h3_spec_size(&specs[n]);
+					if (size == 0 || size > seg_size || total + size > KGL_H3_GSO_MAX_BYTES ||
+						niov + specs[n].iovlen > KGL_H3_SEND_IOV) {
+						break;
+					}
+					memcpy(&batch->send_iov[niov], specs[n].iov, specs[n].iovlen * sizeof(struct iovec));
+					niov += (unsigned)specs[n].iovlen;
+					total += size;
+					++segs;
+					++n;
+					/* only the last segment may be shorter */
+					if (size < seg_size) {
+						break;
+					}
+				}
+			}
+			msg->msg_iovlen = (size_t)(&batch->send_iov[niov] - msg->msg_iov);
+			size_t ctl_len = h3_build_control(batch->send_ctl[nmsg], first, src_ip, segs > 1 ? (uint16_t)seg_size : 0);
+			if (ctl_len > 0) {
+				msg->msg_control = batch->send_ctl[nmsg];
+				msg->msg_controllen = ctl_len;
+			}
+			batch->send_specs[nmsg] = segs;
+			++nmsg;
+		}
+		int done = sendmmsg(peer_engine->uc->st.fd, batch->send_msgs, nmsg, 0);
+		if (done < 0) {
+			saved_errno = errno;
+			if (gso && (saved_errno == EIO || saved_errno == EINVAL)) {
+				/* the device cannot offload it: send the packets one by one */
+				klog(KLOG_WARNING, "UDP GSO send failed errno=%d, disable it for HTTP/3\n", saved_errno);
+				h3_engine->udp_gso = false;
+				continue;
+			}
+			break;
+		}
+		for (int i = 0; i < done; i++) {
+			sent += batch->send_specs[i];
+		}
+		if ((unsigned)done < nmsg) {
+			saved_errno = EAGAIN;
+			break;
+		}
+	}
+	if (sent == 0 && count > 0) {
+		errno = saved_errno ? saved_errno : EAGAIN;
+		return -1;
+	}
+	if (sent < count) {
+		/* lsquic retries the rest once the socket is writable again */
+		errno = EAGAIN;
+	}
+	return (int)sent;
+}
+/* Read the datagrams already queued on the socket with recvmmsg().
+ * Each one goes through the same path as a datagram read by recvmsg().
+ * Returns true when the socket queue is empty. */
+static bool h3_recv_batch(KHttp3ServerEngine* h3_engine, kconnection* uc) {
+	if (uc->udp == nullptr) {
+		return false;
+	}
+	kgl_h3_udp_batch* batch = h3_get_udp_batch(h3_engine);
+	if (batch == nullptr) {
+		return false;
+	}
+	for (int round = 0; round < KGL_H3_RECV_ROUNDS; round++) {
+		for (int i = 0; i < KGL_H3_RECV_BATCH; i++) {
+			struct msghdr* msg = &batch->recv_msgs[i].msg_hdr;
+			batch->recv_iov[i].iov_base = batch->recv_buf[i];
+			batch->recv_iov[i].iov_len = MAX_QUIC_UDP_SIZE;
+			memset(batch->recv_ctl[i], 0, sizeof(batch->recv_ctl[i]));
+			msg->msg_name = &batch->recv_peer[i];
+			msg->msg_namelen = sizeof(sockaddr_i);
+			msg->msg_iov = &batch->recv_iov[i];
+			msg->msg_iovlen = 1;
+			msg->msg_control = batch->recv_ctl[i];
+			msg->msg_controllen = sizeof(batch->recv_ctl[i]);
+			msg->msg_flags = 0;
+		}
+		int n = recvmmsg(uc->st.fd, batch->recv_msgs, KGL_H3_RECV_BATCH, MSG_DONTWAIT, NULL);
+		if (n <= 0) {
+			return n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK);
+		}
+		for (int i = 0; i < n; i++) {
+			int len = (int)batch->recv_msgs[i].msg_len;
+			if (len <= 0 || KBIT_TEST(batch->recv_msgs[i].msg_hdr.msg_flags, MSG_TRUNC)) {
+				continue;
+			}
+			memcpy(&uc->addr, &batch->recv_peer[i], sizeof(sockaddr_i));
+			memcpy(uc->udp, batch->recv_ctl[i], sizeof(kudp_extend));
+			/* lend the buffer to the engine; a packet that moves to another
+			 * thread keeps it and leaves a new buffer in its place */
+			char* own_buffer = (char*)h3_engine->iov_buf[1].iov_base;
+			h3_engine->iov_buf[1].iov_base = batch->recv_buf[i];
+			h3_process_package_in(h3_engine, uc, len);
+			batch->recv_buf[i] = (char*)h3_engine->iov_buf[1].iov_base;
+			h3_engine->iov_buf[1].iov_base = own_buffer;
+		}
+		if (n < KGL_H3_RECV_BATCH) {
+			/* recvmmsg() takes all it can, so a short batch drained the queue */
+			return true;
+		}
+	}
+	return false;
+}
+#else
+void kgl_h3_free_udp_batch(kgl_h3_udp_batch* batch) {
+}
+#endif
 
 int send_packets_out(
 	void* packets_out_ctx,
@@ -239,6 +502,12 @@ int send_packets_out(
 	uintptr_t ancil_key, prev_ancil_key = 0;
 	if (0 == count)
 		return 0;
+#ifdef KGL_H3_BATCH_UDP
+	int batch_sent = h3_send_packets_batch((KHttp3ServerEngine*)packets_out_ctx, specs, count);
+	if (batch_sent != -2) {
+		return batch_sent;
+	}
+#endif
 	//printf("out package count=[%d]\n", count);
 	const unsigned orig_count = count;
 #if 0
@@ -380,6 +649,13 @@ kev_result h3_result_udp_recv(KOPAQUE data, void* arg, int got) {
 	}
 	if (got > 0) {
 		h3_process_package_in(h3_engine, uc, got);
+#ifdef KGL_H3_BATCH_UDP
+		/* take the queued datagrams in batches; once the queue is empty, wait
+		 * for epoll rather than call recvmsg() just to get EAGAIN */
+		if (h3_recv_batch(h3_engine, uc)) {
+			KBIT_CLR(uc->st.base.st_flags, STF_RREADY);
+		}
+#endif
 	}
 	if (h3_engine->server->is_shutdown()) {
 		h3_engine->release();
@@ -654,6 +930,32 @@ int KHttp3ServerEngine::start() {
 	h3_recv_package(this, uc);
 	return 0;
 }
+/* QUIC must not be fragmented (RFC 9000 14), and lsquic's path MTU probes
+ * only tell the truth when oversized datagrams are dropped, not split. */
+static void h3_set_dont_fragment(SOCKET fd, bool ipv6) {
+#if defined(IP_MTU_DISCOVER) && defined(IP_PMTUDISC_PROBE)
+	int val = IP_PMTUDISC_PROBE;
+	if (!ipv6 && setsockopt(fd, IPPROTO_IP, IP_MTU_DISCOVER, (const char*)&val, sizeof(val)) != 0) {
+		klog(KLOG_WARNING, "cann't set IP_MTU_DISCOVER for HTTP/3 errno=%d\n", errno);
+	}
+#elif defined(IP_DONTFRAG)
+	int val = 1;
+	if (!ipv6) {
+		setsockopt(fd, IPPROTO_IP, IP_DONTFRAG, (const char*)&val, sizeof(val));
+	}
+#endif
+#if defined(IPV6_MTU_DISCOVER) && defined(IPV6_PMTUDISC_PROBE)
+	int val6 = IPV6_PMTUDISC_PROBE;
+	if (ipv6 && setsockopt(fd, IPPROTO_IPV6, IPV6_MTU_DISCOVER, (const char*)&val6, sizeof(val6)) != 0) {
+		klog(KLOG_WARNING, "cann't set IPV6_MTU_DISCOVER for HTTP/3 errno=%d\n", errno);
+	}
+#elif defined(IPV6_DONTFRAG)
+	int val6 = 1;
+	if (ipv6) {
+		setsockopt(fd, IPPROTO_IPV6, IPV6_DONTFRAG, (const char*)&val6, sizeof(val6));
+	}
+#endif
+}
 int KHttp3ServerEngine::init(kselector* selector, int udp_flag) {
 	kgl_add_ref_ssl_ctx(server->ssl_ctx);
 	ssl_ctx = server->ssl_ctx;
@@ -689,6 +991,16 @@ int KHttp3ServerEngine::init(kselector* selector, int udp_flag) {
 	if (!kudp_bind(uc, &server->addr)) {
 		return -1;
 	}
+	h3_set_dont_fragment(uc->st.fd, server->addr.v4.sin_family == AF_INET6);
+#ifdef KGL_H3_BATCH_UDP
+	{
+		/* kernels before 4.18 do not know UDP_SEGMENT and would send one
+		 * oversized datagram, so only use it where the option exists */
+		int gso_size = 0;
+		socklen_t len = sizeof(gso_size);
+		udp_gso = getsockopt(uc->st.fd, SOL_UDP, UDP_SEGMENT, &gso_size, &len) == 0;
+	}
+#endif
 	KBIT_SET(uc->st.base.st_flags, STF_RTIME_OUT);
 	selectable_bind_opaque(&uc->st, this);
 	return 0;

@@ -79,7 +79,8 @@ public:
 		lock.Unlock();
 	}
 	void shutdown() override;
-	bool parse(const KXmlAttribute& attr);
+	/* default_life_time is used when the config has no life_time. */
+	bool parse(const KXmlAttribute& attr, int default_life_time = 0);
 	void build(std::map<KString, KString>& attr);
 	void dump(kgl::serializable* s, bool as_mserver=false);
 	KUpstream* get_upstream(uint32_t flags, const char* sni_host = NULL);

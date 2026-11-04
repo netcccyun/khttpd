@@ -18,6 +18,9 @@ struct kgl_h3_cid_header
 #pragma pack(pop)
 
 bool kgl_init_khttp3();
+/* scratch buffers for batched UDP send and receive */
+struct kgl_h3_udp_batch;
+void kgl_h3_free_udp_batch(kgl_h3_udp_batch* batch);
 void kgl_shutdown_khttp3();
 
 class KHttp3Server;
@@ -123,6 +126,9 @@ public:
 	kselector_tick* selector_tick;
 	KHttp3CachedSni* last_sni = nullptr;
 	kgl_ssl_ctx* ssl_ctx = nullptr;
+	kgl_h3_udp_batch* udp_batch = nullptr;
+	/* the kernel can split one large send into many datagrams (UDP GSO) */
+	bool udp_gso = false;
 	friend class KHttp3Server;
 protected:
 	~KHttp3ServerEngine()
@@ -135,6 +141,9 @@ protected:
 		}
 		if (ssl_ctx) kgl_release_ssl_ctx(ssl_ctx);
 		xfree(iov_buf[1].iov_base);
+		if (udp_batch) {
+			kgl_h3_free_udp_batch(udp_batch);
+		}
 		assert(selector_tick == NULL);
 		if (last_sni) {
 			delete last_sni;

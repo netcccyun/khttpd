@@ -404,9 +404,9 @@ void KSockPoolHelper::enable() {
 	lock.Unlock();
 }
 
-bool KSockPoolHelper::parse(const KXmlAttribute& attr) {
+bool KSockPoolHelper::parse(const KXmlAttribute& attr, int default_life_time) {
 	setHostPort(attr("host"), attr("port"));
-	setLifeTime(atoi(attr("life_time")));
+	setLifeTime(attr.get_int("life_time", default_life_time));
 	SetParam(attr["param"].c_str());
 	lock.Lock();
 #ifdef HTTP_PROXY
