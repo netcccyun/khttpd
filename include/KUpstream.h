@@ -18,7 +18,14 @@ enum class HealthStatus
 {
 	//this only detect socket on tcp level(write success)
 	Err,
-	Success
+	Success,
+	/* Connected, but no response header came back (read timeout or close).
+	 * Shared origin nodes and single-process commands ignore it: one rejected
+	 * request must not disable the node, and it says nothing about the other
+	 * requests a multi-child process is serving. A one-request-at-a-time
+	 * (mp) command process is killed: it is hung or gone, and reusing it
+	 * would send the next request into the same hole. */
+	ResponseErr
 };
 
 
