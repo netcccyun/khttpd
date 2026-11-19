@@ -24,6 +24,10 @@ enum class KDechunkResult
 #define KHTTPD_MAX_CHUNK_SIZE      0x1FFFFFFF    /* 000111----1 */
 #define KHTTPD_MAX_TRAILER_LINE    16384
 #define KHTTPD_MAX_TRAILER_COUNT   64
+/* Chunk sizes, leading zeros, extensions and trailers carry no body data.
+ * Fail once everything received exceeds 8x the data plus this slack,
+ * the same flood limit nginx applies to a chunked request body. */
+#define KHTTPD_MAX_CHUNK_OVERHEAD  1048576
 #define KHTTPD_CHUNK_STATUS_PREFIX 0xE0000000    /* 1110------0 */
 #define KHTTPD_CHUNK_PART_SIZE_END 0xA0000000    /* 1010------0 */
 #define KHTTPD_CHUNK_STATUS        0xC0000000    /* 1100------0 */
@@ -44,6 +48,8 @@ public:
 		chunk_size = 0;
 		trailer_count = 0;
 		line_cr = false;
+		received = 0;
+		data_received = 0;
 	}
 	//piece_length是in,out参数，in时指示最大块长度
 	//如果返回的是trailer数据，piece_length会忽略传进来的值。
@@ -55,10 +61,15 @@ public:
 		return state == End;
 	}
 private:
+	KDechunkResult dechunk_internal(const char** buf, const char* end, const char** piece, int* piece_length);
 	enum State { Size, Data, DataCR, DataLF, Trailer, End, Failed } state;
 	uint32_t chunk_size;
 	uint32_t trailer_count;
 	bool line_cr;
+	/* every byte consumed, framing included */
+	int64_t received;
+	/* chunk data bytes only */
+	int64_t data_received;
 	std::string line;
 };
 

@@ -48,6 +48,20 @@ static bool chunk_line(const std::string& line, uint32_t& size) {
 	return true;
 }
 KDechunkResult KDechunkEngine::dechunk(const char** buf, const char* end, const char** piece, int* piece_length) {
+	const char* start = *buf;
+	KDechunkResult result = dechunk_internal(buf, end, piece, piece_length);
+	received += *buf - start;
+	if (result == KDechunkResult::Success) {
+		data_received += *piece_length;
+	}
+	if (result != KDechunkResult::End && result != KDechunkResult::Failed &&
+		received / 8 > data_received + KHTTPD_MAX_CHUNK_OVERHEAD) {
+		state = Failed;
+		return KDechunkResult::Failed;
+	}
+	return result;
+}
+KDechunkResult KDechunkEngine::dechunk_internal(const char** buf, const char* end, const char** piece, int* piece_length) {
 	if (state==End) return KDechunkResult::End;
 	if (state==Failed || *piece_length <= 0) return KDechunkResult::Failed;
 	// Trailers own their storage, so a line can span any number of network reads.
